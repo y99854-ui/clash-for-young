@@ -197,3 +197,26 @@ select { max-width: 100%; text-overflow: ellipsis; }
   .group-row { grid-template-columns: minmax(0, 1fr); }
   .group-ops { justify-content: flex-end; }
 }
+
+/* 折叠卡片 */
+.fold > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 10px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "▸"; color: var(--muted); font-size: 12px; transition: transform .15s; display: inline-block; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold[open] > summary { margin-bottom: 10px; }
+.fold-title { font-weight: 600; }
+button.linklike { background: none; border: 0; padding: 0; color: var(--accent); font-size: inherit; cursor: pointer; text-decoration: underline; }
+
+/* 订阅列表 */
+.subs-list { margin: 6px 0 12px; }
+.sub-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+.sub-row:first-child { border-top: 0; }
+.sub-name { font-weight: 500; }
+.sub-meta { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-ops { display: flex; gap: 4px; }
+.sub-ops button { padding: 4px 8px; font-size: 12px; }
+.tag-file { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 6px; font-weight: normal; }
+.home-sub { margin-top: 10px; }
+.home-sub .line { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); }
+.home-sub .line b { color: var(--text); font-weight: 500; }
+@media (max-width: 760px) { .sub-row { grid-template-columns: minmax(0, 1fr); } .sub-ops { justify-content: flex-end; } }

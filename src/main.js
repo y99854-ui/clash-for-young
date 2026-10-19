@@ -90,7 +90,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
 // ───────── 渲染 ─────────
 function render() {
   if (!S) return;
-  if (!S.subscription) { show("welcome"); return; }
+  if (!S.subscriptions.length) { show("welcome"); return; }
   if (view === "welcome") show("home");
   renderHome();
   renderSites();
@@ -119,14 +119,38 @@ function renderHome() {
 
   $("defaultSelect").innerHTML = targetOptions(S.defaultTarget, "default");
 
-  const sub = S.subscription;
-  const parts = [`${S.nodeCount} 个节点`, `更新于 ${fmtAgo(sub.updatedAt)}`];
+  const subs = S.subscriptions;
+  $("subInfo").textContent = `${subs.length} 个订阅 · 共 ${S.nodeCount} 个节点`;
+  $("homeSubs").innerHTML = subs.map((sub) => {
+    const u = sub.usage;
+    const right = [];
+    if (u && u.total) right.push(`已用 ${fmtBytes(u.upload + u.download)} / ${fmtBytes(u.total)}`);
+    if (u && u.expire) right.push(`${fmtDate(u.expire * 1000)} 到期`);
+    const bar = u && u.total
+      ? `<div class="usage"><div style="width:${Math.min(100, ((u.upload + u.download) / u.total) * 100)}%"></div></div>` : "";
+    return `<div class="home-sub"><div class="line"><span><b>${esc(sub.name)}</b> · ${sub.nodeCount} 个节点</span><span>${esc(right.join(" · "))}</span></div>${bar}</div>`;
+  }).join("");
+}
+
+function subMeta(sub) {
+  const parts = [`${sub.nodeCount} 个节点`, sub.url ? `更新于 ${fmtAgo(sub.updatedAt)}` : `导入于 ${fmtAgo(sub.updatedAt)}`];
   const u = sub.usage;
   if (u && u.total) parts.push(`已用 ${fmtBytes(u.upload + u.download)} / ${fmtBytes(u.total)}`);
   if (u && u.expire) parts.push(`${fmtDate(u.expire * 1000)} 到期`);
-  $("subInfo").textContent = parts.join(" · ");
-  $("usageBar").classList.toggle("hidden", !(u && u.total));
-  if (u && u.total) $("usageFill").style.width = Math.min(100, ((u.upload + u.download) / u.total) * 100) + "%";
+  return parts.join(" · ");
+}
+
+function renderSubs() {
+  const subs = S.subscriptions;
+  $("subsSummary").textContent = `${subs.length} 个订阅 · 共 ${S.nodeCount} 个节点`;
+  $("subsList").innerHTML = subs.map((sub) => `<div class="sub-row">
+      <div><div class="sub-name">${esc(sub.name)}${sub.url ? "" : '<span class="tag-file">文件</span>'}</div>
+        <div class="sub-meta" title="${esc(sub.url || "从文件导入")}">${esc(subMeta(sub))}</div></div>
+      <div class="sub-ops">
+        ${sub.url ? `<button class="ghost" data-sop="refresh" data-sid="${esc(sub.id)}">更新</button>` : ""}
+        <button class="ghost" data-sop="rename" data-sid="${esc(sub.id)}">改名</button>
+        <button class="ghost danger" data-sop="del" data-sid="${esc(sub.id)}">删除</button>
+      </div></div>`).join("");
 }
 
 const CAT_ORDER = ["AI", "视频", "社交", "常用", "科研", "国内", "我添加的"];
@@ -175,10 +199,10 @@ function renderRules() {
 }
 
 function renderSettings() {
-  if (document.activeElement !== $("subUrl")) $("subUrl").value = S.subscription?.url || "";
   if (document.activeElement !== $("mixedPort")) $("mixedPort").value = S.mixedPort;
   if (document.activeElement !== $("ctlPort")) $("ctlPort").value = S.controllerPort;
   $("dataDir").textContent = "数据目录：" + S.dataDir;
+  renderSubs();
   renderGroups();
   renderNodes();
 }
@@ -207,6 +231,7 @@ function renderGroups() {
           <button class="ghost danger" data-gop="del" data-gid="${esc(g.id)}">删除</button>
         </div></div>`).join("")
     : `<p class="muted small">还没有分组，全部节点都在「其他」里。</p>`;
+  $("groupsSummary").textContent = `${gs.length} 个分组`;
   const other = (S.regions || []).find((r) => !r.id);
   $("otherInfo").textContent = other ? `还有 ${other.nodes.length} 个节点不在任何分组，归入「其他」。` : "所有节点都已分组。";
 }
@@ -237,7 +262,7 @@ $("welcomeForm").addEventListener("submit", async (e) => {
   $("welcomeBtn").disabled = true;
   $("welcomeMsg").textContent = "正在下载订阅…";
   try {
-    S = await call("set_subscription", { url }, { quiet: true });
+    S = await call("add_subscription", { url }, { quiet: true });
     $("welcomeMsg").textContent = `找到 ${S.nodeCount} 个节点，正在连接…`;
     try { S = await call("connect", {}, { quiet: true }); } catch (err) { toast(String(err), true); }
     show("home");
@@ -248,6 +273,16 @@ $("welcomeForm").addEventListener("submit", async (e) => {
   } finally {
     $("welcomeBtn").disabled = false;
   }
+});
+
+// 欢迎页：从文件导入，导入后自动连接
+$("welcomeFileBtn").addEventListener("click", () => {
+  afterImport = async () => {
+    try { S = await call("connect", {}, { quiet: true }); } catch (err) { toast(String(err), true); }
+    show("home");
+    tick = 0; pollStatus();
+  };
+  $("subFileInput").click();
 });
 
 $("powerBtn").addEventListener("click", async () => {
@@ -273,16 +308,68 @@ $("defaultSelect").addEventListener("change", async (e) => {
   } catch (_) { render(); }
 });
 
-async function refreshSub(url) {
+async function refreshSub(id) {
   toast("正在更新订阅…");
   try {
-    S = url ? await call("set_subscription", { url }) : await call("refresh_subscription");
+    S = await call("refresh_subscription", { id: id || null });
     render();
-    toast(`订阅已更新：${S.nodeCount} 个节点`);
-  } catch (_) {}
+    toast(`订阅已更新：共 ${S.nodeCount} 个节点`);
+  } catch (_) {
+    await refreshState(); // 部分失败时其他订阅可能已更新
+  }
 }
 $("refreshBtn").addEventListener("click", () => refreshSub());
-$("subForm").addEventListener("submit", (e) => { e.preventDefault(); refreshSub($("subUrl").value.trim()); });
+$("refreshAllBtn").addEventListener("click", () => refreshSub());
+$("subForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = $("subUrl").value.trim();
+  if (!url) return;
+  toast("正在下载订阅…");
+  try {
+    S = await call("add_subscription", { url });
+    $("subUrl").value = "";
+    render();
+    toast(`已添加：现在共 ${S.nodeCount} 个节点`);
+  } catch (_) {}
+});
+
+// 从文件导入：读出文本交给后端（可一次选多个文件）
+let afterImport = null;
+$("subFileBtn").addEventListener("click", () => { afterImport = null; $("subFileInput").click(); });
+$("subFileInput").addEventListener("change", async (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  let ok = 0;
+  for (const f of files) {
+    try {
+      const content = await f.text();
+      S = await call("import_subscription_file", { name: f.name, content });
+      ok++;
+    } catch (_) {}
+  }
+  if (ok) {
+    toast(`已导入 ${ok} 个文件：现在共 ${S.nodeCount} 个节点`);
+    if (afterImport) await afterImport();
+    render();
+  }
+});
+
+$("subsList").addEventListener("click", async (e) => {
+  const op = e.target.dataset.sop, id = e.target.dataset.sid;
+  if (!op) return;
+  const sub = S.subscriptions.find((x) => x.id === id);
+  if (op === "refresh") return refreshSub(id);
+  if (op === "rename") {
+    const name = await askText(`给「${sub.name}」改个名字`, sub.name);
+    if (!name) return;
+    try { S = await call("rename_subscription", { id, name }); render(); } catch (_) {}
+  }
+  if (op === "del") {
+    const last = S.subscriptions.length === 1;
+    if (!(await askConfirm(`删除订阅「${sub.name}」？它的 ${sub.nodeCount} 个节点会被移除。${last ? "这是最后一个订阅，删除后会断开连接。" : ""}`))) return;
+    try { S = await call("remove_subscription", { id }); render(); } catch (_) {}
+  }
+});
 
 // 网站页：选择走向 / 检查 / 编辑
 $("siteGroups").addEventListener("change", async (e) => {
@@ -463,6 +550,21 @@ function askConfirm(text) {
   });
 }
 
+// 输入框（改名用）
+function askText(title, value) {
+  return new Promise((resolve) => {
+    const d = $("textDialog");
+    $("tdTitle").textContent = title;
+    $("tdInput").value = value || "";
+    const done = (v) => { d.close(); $("tdOk").onclick = $("tdNo").onclick = null; resolve(v); };
+    $("tdOk").onclick = () => done($("tdInput").value.trim());
+    $("tdNo").onclick = () => done(null);
+    d.oncancel = () => done(null);
+    d.showModal();
+    $("tdInput").select();
+  });
+}
+
 // 节点分组
 let editingGroup = null;
 let gdManual = new Set();
@@ -543,7 +645,7 @@ $("resetGroupsBtn").addEventListener("click", async () => {
 // ───────── 启动 ─────────
 (async () => {
   await refreshState();
-  if (S && S.subscription) show("home");
+  if (S && S.subscriptions.length) show("home");
   render();
   pollStatus();
   setInterval(pollStatus, 5000);

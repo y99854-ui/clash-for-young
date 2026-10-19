@@ -27,6 +27,7 @@
         <input id="welcomeUrl" placeholder="https://… （在机场后台复制 Clash 订阅链接）" autocomplete="off" spellcheck="false" />
         <button type="submit" id="welcomeBtn">开始</button>
       </form>
+      <p class="muted small">没有链接？也可以 <button type="button" class="linklike" id="welcomeFileBtn">从文件导入</button>（Clash / mihomo 的 .yaml 配置或订阅文件）。</p>
       <p id="welcomeMsg" class="muted small"></p>
     </div>
   </main>
@@ -58,7 +59,7 @@
         </div>
         <button id="refreshBtn" class="ghost">更新订阅</button>
       </div>
-      <div id="usageBar" class="usage hidden"><div id="usageFill"></div></div>
+      <div id="homeSubs"></div>
     </section>
   </main>
 
@@ -77,8 +78,8 @@
       </form>
     </section>
 
-    <details class="card adv" id="rulesBox">
-      <summary>高级：自定义规则</summary>
+    <details class="card adv fold" id="rulesBox">
+      <summary><span class="fold-title">高级：自定义规则</span></summary>
       <p class="muted small">按域名、关键词或 IP 段指定走向。从上到下依次匹配，优先于上面的网站设置。</p>
       <div id="rulesList"></div>
       <div class="row actions">
@@ -91,21 +92,22 @@
 
   <!-- ───────── 设置 ───────── -->
   <main id="view-settings" class="hidden">
-    <section class="card">
-      <div class="field-title">订阅链接</div>
+    <details class="card fold" id="subsBox">
+      <summary><span class="fold-title">订阅</span><span id="subsSummary" class="muted small"></span></summary>
+      <p class="muted small">可以添加多个订阅，所有订阅的节点合在一起使用、一起分组。链接订阅每 6 小时自动更新；从文件导入的订阅不会自动更新。</p>
+      <div id="subsList" class="subs-list"></div>
       <form id="subForm" class="row">
-        <input id="subUrl" autocomplete="off" spellcheck="false" />
-        <button type="submit">保存并更新</button>
+        <input id="subUrl" placeholder="粘贴订阅链接 https://…" autocomplete="off" spellcheck="false" />
+        <button type="submit">添加链接</button>
+        <button type="button" id="subFileBtn" class="ghost">从文件导入</button>
       </form>
-      <p class="muted small">订阅每 6 小时自动更新一次。</p>
-    </section>
+      <div class="row actions"><span class="spacer"></span><button type="button" id="refreshAllBtn" class="ghost small-btn">全部更新</button></div>
+    </details>
 
-    <section class="card">
+    <details class="card fold" id="groupsBox">
+      <summary><span class="fold-title">节点分组</span><span id="groupsSummary" class="muted small"></span></summary>
       <div class="sub-line">
-        <div>
-          <div class="field-title">节点分组</div>
-          <div class="muted small">按节点名里的关键词把节点归成一组，组内自动选最快的节点。首页和网站页都可以选分组。</div>
-        </div>
+        <div class="muted small">按节点名里的关键词把节点归成一组，组内自动选最快的节点。首页和网站页都可以选分组。</div>
         <button id="addGroupBtn" class="ghost">＋ 新建分组</button>
       </div>
       <div id="groupsList" class="groups-list"></div>
@@ -114,10 +116,12 @@
         <span class="spacer"></span>
         <button id="resetGroupsBtn" class="ghost small-btn">恢复默认分组</button>
       </div>
-    </section>
+    </details>
 
-    <details class="card adv" id="checkBox">
-      <summary>高级：分流检查</summary>
+    <input type="file" id="subFileInput" accept=".yaml,.yml,.txt,.conf,text/yaml,text/plain" multiple class="hidden" />
+
+    <details class="card adv fold" id="checkBox">
+      <summary><span class="fold-title">高级：分流检查</span></summary>
       <p class="muted small">输入网址，看它实际命中了哪条规则、走了哪个节点。</p>
       <form id="checkForm" class="row">
         <input id="checkUrl" list="siteList" placeholder="例如 discord.com" autocomplete="off" spellcheck="false" />
@@ -127,14 +131,14 @@
       <div id="checkResult"></div>
     </details>
 
-    <details class="card adv" id="nodesBox">
-      <summary>高级：节点列表</summary>
+    <details class="card adv fold" id="nodesBox">
+      <summary><span class="fold-title">高级：节点列表</span></summary>
       <div class="row actions"><button id="delayBtn" class="ghost">测试全部节点延迟</button><span id="delayMsg" class="muted small"></span></div>
       <div id="nodesList"></div>
     </details>
 
-    <details class="card adv">
-      <summary>高级：端口与日志</summary>
+    <details class="card adv fold">
+      <summary><span class="fold-title">高级：端口与日志</span></summary>
       <div class="row">
         <label>代理端口<input id="mixedPort" type="number" /></label>
         <label>控制端口<input id="ctlPort" type="number" /></label>
@@ -185,6 +189,17 @@
         <span class="spacer"></span>
         <button type="button" id="gdCancel" class="ghost">取消</button>
         <button type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="textDialog">
+    <form method="dialog" onsubmit="return false">
+      <div class="field-title" id="tdTitle"></div>
+      <input id="tdInput" />
+      <div class="row actions"><span class="spacer"></span>
+        <button type="button" id="tdNo" class="ghost">取消</button>
+        <button type="submit" id="tdOk">确定</button>
       </div>
     </form>
   </dialog>
