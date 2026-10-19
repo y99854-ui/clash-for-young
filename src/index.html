@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clash for Young</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img id="brandCat" src="assets/cat-sleep.png" alt="" />Clash for Young</div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="home">首页</button>
+      <button class="tab" data-view="sites">网站</button>
+      <button class="tab" data-view="settings">设置</button>
+    </nav>
+  </header>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ───────── 第一次打开 ───────── -->
+  <main id="view-welcome" class="hidden">
+    <div class="card welcome">
+      <h1>欢迎使用 Clash for Young</h1>
+      <p>只需要一步：粘贴你的订阅链接。</p>
+      <form id="welcomeForm" class="row">
+        <input id="welcomeUrl" placeholder="https://… （在机场后台复制 Clash 订阅链接）" autocomplete="off" spellcheck="false" />
+        <button type="submit" id="welcomeBtn">开始</button>
+      </form>
+      <p id="welcomeMsg" class="muted small"></p>
+    </div>
+  </main>
+
+  <!-- ───────── 首页 ───────── -->
+  <main id="view-home" class="hidden">
+    <div id="homeError" class="error hidden"></div>
+    <section class="card hero">
+      <button id="powerBtn" class="power" title="点小猫连接 / 断开">
+        <img id="catImg" src="assets/cat-sleep.png" alt="" />
+      </button>
+      <div class="hero-text">
+        <div id="connText" class="conn-text">未连接</div>
+        <div id="nowText" class="muted"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="field-title">默认地区</div>
+      <p class="muted small">没有单独设置的网站都走这里。国内网站始终直连。分组可以在「设置 → 节点分组」里修改。</p>
+      <select id="defaultSelect"></select>
+    </section>
+
+    <section class="card">
+      <div class="sub-line">
+        <div>
+          <div class="field-title">订阅</div>
+          <div id="subInfo" class="muted small"></div>
+        </div>
+        <button id="refreshBtn" class="ghost">更新订阅</button>
+      </div>
+      <div id="usageBar" class="usage hidden"><div id="usageFill"></div></div>
+    </section>
+  </main>
+
+  <!-- ───────── 网站 ───────── -->
+  <main id="view-sites" class="hidden">
+    <div id="fallbackWarn" class="warn hidden"></div>
+    <p class="muted small">给每个网站选择走向。<b>自动</b> = 跟随首页的默认地区（国内网站直连）。改完立即生效，可以点「检查」确认。</p>
+    <div id="siteGroups"></div>
+
+    <section class="card">
+      <div class="field-title">添加网站</div>
+      <form id="addSiteForm" class="row">
+        <input id="addSiteUrl" placeholder="网址或域名，例如 example.com" autocomplete="off" spellcheck="false" />
+        <input id="addSiteName" placeholder="名称（可不填）" class="narrow-input" />
+        <button type="submit">添加</button>
+      </form>
+    </section>
+
+    <details class="card adv" id="rulesBox">
+      <summary>高级：自定义规则</summary>
+      <p class="muted small">按域名、关键词或 IP 段指定走向。从上到下依次匹配，优先于上面的网站设置。</p>
+      <div id="rulesList"></div>
+      <div class="row actions">
+        <button id="addRuleBtn" class="ghost">＋ 添加规则</button>
+        <span class="spacer"></span>
+        <button id="saveRulesBtn">保存规则</button>
+      </div>
+    </details>
+  </main>
+
+  <!-- ───────── 设置 ───────── -->
+  <main id="view-settings" class="hidden">
+    <section class="card">
+      <div class="field-title">订阅链接</div>
+      <form id="subForm" class="row">
+        <input id="subUrl" autocomplete="off" spellcheck="false" />
+        <button type="submit">保存并更新</button>
+      </form>
+      <p class="muted small">订阅每 6 小时自动更新一次。</p>
+    </section>
+
+    <section class="card">
+      <div class="sub-line">
+        <div>
+          <div class="field-title">节点分组</div>
+          <div class="muted small">按节点名里的关键词把节点归成一组，组内自动选最快的节点。首页和网站页都可以选分组。</div>
+        </div>
+        <button id="addGroupBtn" class="ghost">＋ 新建分组</button>
+      </div>
+      <div id="groupsList" class="groups-list"></div>
+      <div class="row actions">
+        <span id="otherInfo" class="muted small"></span>
+        <span class="spacer"></span>
+        <button id="resetGroupsBtn" class="ghost small-btn">恢复默认分组</button>
+      </div>
+    </section>
+
+    <details class="card adv" id="checkBox">
+      <summary>高级：分流检查</summary>
+      <p class="muted small">输入网址，看它实际命中了哪条规则、走了哪个节点。</p>
+      <form id="checkForm" class="row">
+        <input id="checkUrl" list="siteList" placeholder="例如 discord.com" autocomplete="off" spellcheck="false" />
+        <datalist id="siteList"></datalist>
+        <button type="submit" id="checkBtn">检查</button>
+      </form>
+      <div id="checkResult"></div>
+    </details>
+
+    <details class="card adv" id="nodesBox">
+      <summary>高级：节点列表</summary>
+      <div class="row actions"><button id="delayBtn" class="ghost">测试全部节点延迟</button><span id="delayMsg" class="muted small"></span></div>
+      <div id="nodesList"></div>
+    </details>
+
+    <details class="card adv">
+      <summary>高级：端口与日志</summary>
+      <div class="row">
+        <label>代理端口<input id="mixedPort" type="number" /></label>
+        <label>控制端口<input id="ctlPort" type="number" /></label>
+        <button id="portsBtn" class="ghost">保存端口</button>
+      </div>
+      <p class="muted small">端口被其他代理软件占用时，软件会自动换一个空闲端口。</p>
+      <div class="row actions">
+        <button id="logBtn" class="ghost">查看内核日志</button>
+        <button id="cfgBtn" class="ghost">查看生成的配置</button>
+      </div>
+      <pre id="logBox" class="logbox hidden"></pre>
+      <p id="dataDir" class="muted small"></p>
+    </details>
+
+    <p class="muted small about">Clash for Young · 基于 mihomo 内核 · GPL-3.0</p>
+  </main>
+
+  <!-- 编辑网站的对话框 -->
+  <dialog id="siteDialog">
+    <form method="dialog" id="siteDialogForm">
+      <div class="field-title" id="sdTitle">编辑网站</div>
+      <label class="small muted">名称<input id="sdName" /></label>
+      <label class="small muted">检查用的网址<input id="sdUrl" /></label>
+      <label class="small muted">包含的域名（每行一个，自动包含子域名）<textarea id="sdDomains" rows="7" spellcheck="false"></textarea></label>
+      <div class="row actions">
+        <button type="button" id="sdDelete" class="ghost danger">删除</button>
+        <span class="spacer"></span>
+        <button type="button" id="sdCancel" class="ghost">取消</button>
+        <button type="submit" id="sdSave">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 编辑分组的对话框 -->
+  <dialog id="groupDialog" class="wide">
+    <form method="dialog" id="groupForm">
+      <div class="field-title" id="gdTitle">新建分组</div>
+      <label class="small muted">名称<input id="gdName" placeholder="例如 日本" /></label>
+      <label class="small muted">关键词（节点名包含任一关键词就归入此组；用逗号分隔；2–3 个字母的英文缩写会整词匹配）
+        <input id="gdKeywords" placeholder="例如 日本, 东京, JP, 🇯🇵" spellcheck="false" /></label>
+      <div class="small muted gd-nodes-head">
+        <span>也可以手动勾选节点</span>
+        <input id="gdFilter" placeholder="筛选节点" class="gd-filter" />
+      </div>
+      <div id="gdNodes" class="gd-nodes"></div>
+      <div class="row actions">
+        <span id="gdCount" class="muted small"></span>
+        <span class="spacer"></span>
+        <button type="button" id="gdCancel" class="ghost">取消</button>
+        <button type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog">
+    <p id="cfText"></p>
+    <div class="row actions"><span class="spacer"></span>
+      <button type="button" id="cfNo" class="ghost">取消</button>
+      <button type="button" id="cfYes">确定</button>
+    </div>
+  </dialog>
+
+  <script src="main.js"></script>
+</body>
+</html>
