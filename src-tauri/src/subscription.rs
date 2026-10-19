@@ -205,6 +205,7 @@ pub fn parse_many(texts: &[String], defs: &[NodeGroup]) -> Parsed {
 }
 
 /// 解析单份订阅（没有可用节点时报错）
+#[allow(dead_code)]
 pub fn parse(text: &str, defs: &[NodeGroup]) -> Result<Parsed, String> {
     validate(text)?;
     Ok(parse_many(&[text.to_string()], defs))

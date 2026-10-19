@@ -22,7 +22,26 @@ fn window_icon(on: bool) -> Image<'static> {
     Image::from_bytes(bytes).expect("window icon")
 }
 
-fn show_window(app: &AppHandle) {
+/// Mac：窗口收起时只留菜单栏小猫，不占程序坞；打开窗口时再回到程序坞
+#[allow(unused_variables)]
+fn set_dock_visible(app: &AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let policy = if visible { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory };
+        let _ = app.set_activation_policy(policy);
+    }
+}
+
+/// 收起到菜单栏（Mac）/ 任务栏右下角托盘（Windows）
+pub fn hide_to_tray(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.hide();
+    }
+    set_dock_visible(app, false);
+}
+
+pub fn show_window(app: &AppHandle) {
+    set_dock_visible(app, true);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();
