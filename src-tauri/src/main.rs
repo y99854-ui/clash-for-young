@@ -33,10 +33,12 @@ fn main() {
                 loop {
                     let due = {
                         let s = st.settings.lock().unwrap();
-                        s.subscriptions.first().map(|x| settings::now_ms() - x.updated_at > AUTO_UPDATE.as_millis() as i64)
+                        s.subscriptions
+                            .iter()
+                            .any(|x| !x.url.is_empty() && settings::now_ms() - x.updated_at > AUTO_UPDATE.as_millis() as i64)
                     };
-                    if due == Some(true) {
-                        let _ = app::refresh_subscription(handle.state::<AppState>()).await;
+                    if due {
+                        app::auto_refresh(&st).await;
                     }
                     tokio::time::sleep(Duration::from_secs(600)).await;
                 }
@@ -45,7 +47,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             app::get_state,
-            app::set_subscription,
+            app::add_subscription,
+            app::import_subscription_file,
+            app::remove_subscription,
+            app::rename_subscription,
             app::refresh_subscription,
             app::connect,
             app::disconnect,

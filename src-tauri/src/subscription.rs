@@ -148,47 +148,66 @@ fn info_regex() -> &'static Regex {
     R.get_or_init(|| Regex::new(INFO_PATTERN).unwrap())
 }
 
-/// defs：分组定义；节点不能和分组重名
-pub fn parse(text: &str, defs: &[NodeGroup]) -> Result<Parsed, String> {
+/// 检查一份订阅内容是不是 Clash 格式，并且至少有一个可用节点；返回可用节点数
+pub fn validate(text: &str) -> Result<usize, String> {
+    let n = usable_items(text)?.len();
+    if n == 0 {
+        return Err("订阅里没有可用的节点。请确认链接或文件正确、套餐没有过期。".into());
+    }
+    Ok(n)
+}
+
+fn usable_items(text: &str) -> Result<Vec<Mapping>, String> {
     let doc: Value = serde_yaml::from_str(text).map_err(|_| not_clash_hint(text))?;
     let list = doc
         .get("proxies")
         .and_then(|v| v.as_sequence())
         .ok_or_else(|| not_clash_hint(text))?;
+    Ok(list
+        .iter()
+        .filter_map(|item| item.as_mapping())
+        .filter(|map| {
+            let name = map.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+            let has_server =
+                map.get("server").is_some() || map.get("type").and_then(|v| v.as_str()) == Some("wireguard");
+            !name.is_empty() && map.get("type").is_some() && has_server && !info_regex().is_match(name)
+        })
+        .cloned()
+        .collect())
+}
 
+/// 合并多份订阅的节点。无法解析的那份直接跳过。defs：分组定义；节点不能和分组重名
+pub fn parse_many(texts: &[String], defs: &[NodeGroup]) -> Parsed {
     let mut reserved = reserved_names();
     reserved.extend(defs.iter().map(|g| g.name.clone()));
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut proxies = vec![];
-    for item in list {
-        let Some(map) = item.as_mapping() else { continue };
-        let name = map.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-        let has_server = map.get("server").is_some() || map.get("type").and_then(|v| v.as_str()) == Some("wireguard");
-        if name.is_empty() || map.get("type").is_none() || !has_server {
-            continue;
+    for text in texts {
+        let Ok(items) = usable_items(text) else { continue };
+        for map in items {
+            let name = map.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            // 去重：和生成的组名或其他节点（包括别的订阅里的）重名时加序号
+            let mut final_name = name.clone();
+            let mut i = 2;
+            while used.contains(&final_name) || reserved.contains(&final_name) {
+                final_name = format!("{name} {i}");
+                i += 1;
+            }
+            used.insert(final_name.clone());
+            let mut m = map.clone();
+            m.insert(Value::from("name"), Value::from(final_name));
+            proxies.push(m);
         }
-        if info_regex().is_match(&name) {
-            continue;
-        }
-        // 去重：和生成的组名或其他节点重名时加序号
-        let mut final_name = name.clone();
-        let mut i = 2;
-        while used.contains(&final_name) || reserved.contains(&final_name) {
-            final_name = format!("{name} {i}");
-            i += 1;
-        }
-        used.insert(final_name.clone());
-        let mut m = map.clone();
-        m.insert(Value::from("name"), Value::from(final_name));
-        proxies.push(m);
     }
-    if proxies.is_empty() {
-        return Err("订阅里没有可用的节点。请确认链接正确、套餐没有过期。".into());
-    }
-
     let mut parsed = Parsed { proxies, ..Default::default() };
     parsed.apply_groups(defs);
-    Ok(parsed)
+    parsed
+}
+
+/// 解析单份订阅（没有可用节点时报错）
+pub fn parse(text: &str, defs: &[NodeGroup]) -> Result<Parsed, String> {
+    validate(text)?;
+    Ok(parse_many(&[text.to_string()], defs))
 }
 
 fn not_clash_hint(text: &str) -> String {
@@ -325,6 +344,16 @@ proxies:
         assert_eq!(p.all_groups.len(), 3);
         assert_eq!(p.regions[1].nodes, vec!["日本 2", "JP-02", "Mars"]);
         assert_eq!(p.regions[2].nodes, vec!["香港 01", "香港 01 2"]);
+    }
+
+    #[test]
+    fn merge_two_subscriptions() {
+        let a = "proxies:\n  - {name: \"美国 01\", type: ss, server: a.com, port: 1, cipher: aes-128-gcm, password: x}\n".to_string();
+        let b = "proxies:\n  - {name: \"美国 01\", type: ss, server: b.com, port: 1, cipher: aes-128-gcm, password: x}\n  - {name: \"台湾 01\", type: ss, server: c.com, port: 1, cipher: aes-128-gcm, password: x}\n".to_string();
+        let bad = "not yaml: [".to_string();
+        let p = parse_many(&[a, bad, b], &default_groups());
+        assert_eq!(p.node_names(), vec!["美国 01", "美国 01 2", "台湾 01"]);
+        assert_eq!(p.regions[0].nodes.len(), 2);
     }
 
     #[test]

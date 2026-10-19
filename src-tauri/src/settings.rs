@@ -17,7 +17,14 @@ pub type Target = String;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Subscription {
+    /// 唯一编号，内容保存在 subscription-<id>.yaml
+    pub id: String,
+    /// 显示名（链接的域名或文件名，可改）
+    pub name: String,
+    /// 订阅链接；从文件导入的为空（不会自动更新）
     pub url: String,
+    /// 可用节点数
+    pub node_count: usize,
     /// 上次成功更新的时间（毫秒时间戳）
     pub updated_at: i64,
     /// 订阅响应头 subscription-userinfo

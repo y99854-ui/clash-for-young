@@ -37,29 +37,53 @@ const GEO_MIRRORS: &[&str] = &[
     "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/",
 ];
 
-fn sub_file(dir: &Path, i: usize) -> PathBuf {
-    dir.join(format!("subscription-{i}.yaml"))
+fn sub_file(dir: &Path, id: &str) -> PathBuf {
+    dir.join(format!("subscription-{id}.yaml"))
+}
+
+fn host_of(url: &str) -> String {
+    url::Url::parse(url.trim()).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_else(|| "订阅".into())
+}
+
+/// 旧版只有一个订阅、没有编号，文件名是 subscription-0.yaml：补上编号、名字和节点数
+fn migrate_subscriptions(dir: &Path, s: &mut Settings) {
+    for (i, sub) in s.subscriptions.iter_mut().enumerate() {
+        if sub.id.is_empty() {
+            sub.id = format!("s{i}");
+            let old = dir.join(format!("subscription-{i}.yaml"));
+            if old.exists() {
+                let _ = std::fs::rename(&old, sub_file(dir, &sub.id));
+            }
+        }
+        if sub.name.is_empty() {
+            sub.name = if sub.url.is_empty() { "导入的订阅".into() } else { host_of(&sub.url) };
+        }
+        if sub.node_count == 0 {
+            if let Ok(t) = std::fs::read_to_string(sub_file(dir, &sub.id)) {
+                sub.node_count = subscription::validate(&t).unwrap_or(0);
+            }
+        }
+    }
 }
 
 impl AppState {
     pub fn new(dir: PathBuf, geo_resource_dir: Option<PathBuf>) -> AppState {
         let _ = std::fs::create_dir_all(dir.join("core"));
-        let settings = settings::load(&dir);
-        let parsed = std::fs::read_to_string(sub_file(&dir, 0))
-            .ok()
-            .and_then(|t| subscription::parse(&t, &settings.node_groups()).ok())
-            .unwrap_or_default();
+        let mut settings = settings::load(&dir);
+        migrate_subscriptions(&dir, &mut settings);
         let _ = settings::save(&dir, &settings);
         let core = Core::new(dir.join("core"));
-        AppState {
+        let app = AppState {
             dir,
             settings: Mutex::new(settings),
-            parsed: Mutex::new(parsed),
+            parsed: Mutex::new(Parsed::default()),
             core,
             geo_resource_dir,
             connected: AtomicBool::new(false),
             op: tokio::sync::Mutex::new(()),
-        }
+        };
+        app.reparse();
+        app
     }
 
     pub fn api(&self) -> Api {
@@ -195,23 +219,98 @@ impl AppState {
         r
     }
 
-    async fn load_subscription(&self, url: &str) -> Result<(), String> {
+    /// 读取全部订阅文件，合并节点、重新分组
+    fn reparse(&self) {
+        let (subs, defs) = {
+            let s = self.settings.lock().unwrap();
+            (s.subscriptions.clone(), s.node_groups())
+        };
+        let texts: Vec<String> =
+            subs.iter().filter_map(|s| std::fs::read_to_string(sub_file(&self.dir, &s.id)).ok()).collect();
+        *self.parsed.lock().unwrap() = subscription::parse_many(&texts, &defs);
+    }
+
+    /// 订阅增删改之后：重新合并节点，生成配置；一个节点都没有了就断开
+    async fn after_subs_changed(&self) -> Result<(), String> {
+        self.reparse();
+        if self.parsed.lock().unwrap().proxies.is_empty() {
+            if self.core.is_running() {
+                self.disconnect(true)?;
+            }
+            return Ok(());
+        }
+        if self.core.is_running() {
+            self.apply(&[]).await?;
+        } else {
+            self.write_config()?;
+        }
+        Ok(())
+    }
+
+    /// 下载（或重新下载）一个链接订阅。同一个链接已存在就更新它
+    async fn fetch_url_sub(&self, url: &str) -> Result<(), String> {
+        let url = url.trim();
         let via = if self.core.is_running() { Some(self.settings.lock().unwrap().mixed_port) } else { None };
         let fetched = subscription::fetch(url, via).await?;
-        let groups = self.settings.lock().unwrap().node_groups();
-        let parsed = subscription::parse(&fetched.text, &groups)?;
-        std::fs::write(sub_file(&self.dir, 0), &fetched.text).map_err(|e| format!("无法保存订阅：{e}"))?;
-        *self.parsed.lock().unwrap() = parsed;
+        let n = subscription::validate(&fetched.text)?;
+        let id = self
+            .settings
+            .lock()
+            .unwrap()
+            .subscriptions
+            .iter()
+            .find(|s| s.url == url)
+            .map(|s| s.id.clone())
+            .unwrap_or_else(|| format!("s{}", settings::now_ms()));
+        std::fs::write(sub_file(&self.dir, &id), &fetched.text).map_err(|e| format!("无法保存订阅：{e}"))?;
         {
             let mut s = self.settings.lock().unwrap();
-            let sub = Subscription { url: url.trim().to_string(), updated_at: settings::now_ms(), usage: fetched.usage };
-            if s.subscriptions.is_empty() {
-                s.subscriptions.push(sub);
-            } else {
-                s.subscriptions[0] = sub;
+            match s.subscriptions.iter_mut().find(|x| x.id == id) {
+                Some(sub) => {
+                    sub.updated_at = settings::now_ms();
+                    sub.usage = fetched.usage;
+                    sub.node_count = n;
+                }
+                None => s.subscriptions.push(Subscription {
+                    id,
+                    name: host_of(url),
+                    url: url.to_string(),
+                    node_count: n,
+                    updated_at: settings::now_ms(),
+                    usage: fetched.usage,
+                }),
             }
         }
         self.save_settings()
+    }
+
+    /// 从文件导入订阅（Clash 配置文件或订阅内容）
+    fn import_file_sub(&self, file_name: &str, content: &str) -> Result<(), String> {
+        let n = subscription::validate(content)?;
+        let id = format!("s{}", settings::now_ms());
+        std::fs::write(sub_file(&self.dir, &id), content).map_err(|e| format!("无法保存订阅：{e}"))?;
+        let name = file_name.rsplit_once('.').map(|(a, _)| a).unwrap_or(file_name).trim();
+        self.settings.lock().unwrap().subscriptions.push(Subscription {
+            id,
+            name: if name.is_empty() { "导入的订阅".into() } else { name.to_string() },
+            url: String::new(),
+            node_count: n,
+            updated_at: settings::now_ms(),
+            usage: None,
+        });
+        self.save_settings()
+    }
+
+    /// 更新所有链接订阅；返回失败的（名字，原因）
+    async fn refresh_all(&self) -> Vec<(String, String)> {
+        let subs = self.settings.lock().unwrap().subscriptions.clone();
+        let mut failed = vec![];
+        for s in subs.iter().filter(|s| !s.url.is_empty()) {
+            if let Err(e) = self.fetch_url_sub(&s.url).await {
+                failed.push((s.name.clone(), e));
+            }
+        }
+        failed
     }
 }
 
@@ -239,7 +338,7 @@ pub struct GroupView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StateView {
-    pub subscription: Option<Subscription>,
+    pub subscriptions: Vec<Subscription>,
     /// 有节点的分组（可选的走向）
     pub regions: Vec<Region>,
     /// 全部分组的定义和匹配结果（分组管理用）
@@ -270,7 +369,7 @@ fn state_view(app: &AppState) -> StateView {
         .collect();
     let running = app.core.is_running();
     StateView {
-        subscription: st.subscriptions.first().cloned(),
+        subscriptions: st.subscriptions.clone(),
         node_count: parsed.proxies.len(),
         regions: parsed.regions.clone(),
         groups: st
@@ -304,23 +403,80 @@ pub fn get_state(app: S) -> StateView {
     state_view(&app)
 }
 
+/// 添加订阅链接（同一个链接已存在就更新它）
 #[tauri::command]
-pub async fn set_subscription(app: S<'_>, url: String) -> Result<StateView, String> {
+pub async fn add_subscription(app: S<'_>, url: String) -> Result<StateView, String> {
     let _g = app.op.lock().await;
-    app.load_subscription(&url).await?;
-    if app.core.is_running() {
-        app.apply(&[]).await?;
-    } else {
-        app.write_config()?;
-    }
+    app.fetch_url_sub(&url).await?;
+    app.after_subs_changed().await?;
+    Ok(state_view(&app))
+}
+
+/// 从文件导入订阅：界面读出文件内容后传过来
+#[tauri::command]
+pub async fn import_subscription_file(app: S<'_>, name: String, content: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.import_file_sub(&name, &content)?;
+    app.after_subs_changed().await?;
     Ok(state_view(&app))
 }
 
 #[tauri::command]
-pub async fn refresh_subscription(app: S<'_>) -> Result<StateView, String> {
-    let url = app.settings.lock().unwrap().subscriptions.first().map(|s| s.url.clone());
-    let Some(url) = url else { return Err("还没有添加订阅。".into()) };
-    set_subscription(app, url).await
+pub async fn remove_subscription(app: S<'_>, id: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.settings.lock().unwrap().subscriptions.retain(|s| s.id != id);
+    app.save_settings()?;
+    let _ = std::fs::remove_file(sub_file(&app.dir, &id));
+    app.after_subs_changed().await?;
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn rename_subscription(app: S<'_>, id: String, name: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("名字不能为空。".into());
+    }
+    if let Some(s) = app.settings.lock().unwrap().subscriptions.iter_mut().find(|s| s.id == id) {
+        s.name = name;
+    }
+    app.save_settings()?;
+    Ok(state_view(&app))
+}
+
+/// 更新链接订阅：给 id 只更新那一个，不给就全部更新
+#[tauri::command]
+pub async fn refresh_subscription(app: S<'_>, id: Option<String>) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let url_subs: Vec<Subscription> =
+        app.settings.lock().unwrap().subscriptions.iter().filter(|s| !s.url.is_empty()).cloned().collect();
+    if url_subs.is_empty() {
+        return Err("没有可以更新的订阅链接（从文件导入的订阅需要重新导入）。".into());
+    }
+    let failed = match id {
+        Some(id) => {
+            let Some(s) = url_subs.iter().find(|s| s.id == id) else { return Err("找不到这个订阅。".into()) };
+            match app.fetch_url_sub(&s.url).await {
+                Ok(()) => vec![],
+                Err(e) => vec![(s.name.clone(), e)],
+            }
+        }
+        None => app.refresh_all().await,
+    };
+    app.after_subs_changed().await?;
+    if !failed.is_empty() {
+        let msg = failed.iter().map(|(n, e)| format!("「{n}」{e}")).collect::<Vec<_>>().join("\n");
+        return Err(format!("部分订阅更新失败（其他订阅已更新）：\n{msg}"));
+    }
+    Ok(state_view(&app))
+}
+
+/// 后台定时更新（不占用界面的错误提示）
+pub async fn auto_refresh(app: &AppState) {
+    let _g = app.op.lock().await;
+    let _ = app.refresh_all().await;
+    let _ = app.after_subs_changed().await;
 }
 
 #[tauri::command]
@@ -795,7 +951,8 @@ mod e2e {
             }
             s.groups = Some(g);
         }
-        app.load_subscription(&sub).await.unwrap();
+        app.fetch_url_sub(&sub).await.unwrap();
+        app.reparse();
         let p = app.parsed.lock().unwrap().clone();
         let names: Vec<_> = p.regions.iter().map(|r| r.name.clone()).collect();
         println!("regions: {names:?}");
@@ -841,6 +998,19 @@ mod e2e {
         let r = check::inspect(app.api(), "http://example.org:18081".into(), false).await.unwrap();
         println!("example: rule={} chains={:?}", r.rule, r.chains);
         assert!(r.chains.contains(&"香港".to_string()));
+
+        // 多订阅：从文件再导入一份，节点合并；删掉后恢复
+        let before = app.parsed.lock().unwrap().proxies.len();
+        app.import_file_sub("备用.yaml", "proxies:\n  - {name: \"台湾 备用\", type: ss, server: 127.0.0.1, port: 18388, cipher: aes-128-gcm, password: testpass123}\n").unwrap();
+        app.after_subs_changed().await.expect("reload with two subs");
+        assert_eq!(app.parsed.lock().unwrap().proxies.len(), before + 1);
+        assert!(app.parsed.lock().unwrap().regions.iter().any(|r| r.name == "台湾"));
+        let subs = app.settings.lock().unwrap().subscriptions.clone();
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[1].name, "备用");
+        app.settings.lock().unwrap().subscriptions.truncate(1);
+        app.after_subs_changed().await.unwrap();
+        assert_eq!(app.parsed.lock().unwrap().proxies.len(), before);
 
         // 内核被杀后自动重启
         let pid_before = app.core.is_running();
