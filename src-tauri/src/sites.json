@@ -1,0 +1,39 @@
+[
+  { "id": "chatgpt", "cat": "AI", "name": "ChatGPT", "url": "chatgpt.com", "domains": ["chatgpt.com", "openai.com", "oaistatic.com", "oaiusercontent.com"] },
+  { "id": "claude", "cat": "AI", "name": "Claude", "url": "claude.ai", "domains": ["claude.ai", "anthropic.com", "claudeusercontent.com"] },
+  { "id": "gemini", "cat": "AI", "name": "Gemini", "url": "gemini.google.com", "domains": ["gemini.google.com", "bard.google.com", "aistudio.google.com", "generativelanguage.googleapis.com"] },
+
+  { "id": "youtube", "cat": "视频", "name": "YouTube", "url": "www.youtube.com", "domains": ["youtube.com", "youtu.be", "googlevideo.com", "ytimg.com", "ggpht.com", "youtube-nocookie.com", "youtubei.googleapis.com"] },
+  { "id": "netflix", "cat": "视频", "name": "Netflix", "url": "www.netflix.com", "domains": ["netflix.com", "netflix.net", "nflxvideo.net", "nflximg.net", "nflximg.com", "nflxext.com", "nflxso.net"] },
+  { "id": "disney", "cat": "视频", "name": "Disney+", "url": "www.disneyplus.com", "domains": ["disneyplus.com", "disney-plus.net", "dssott.com", "bamgrid.com"] },
+  { "id": "spotify", "cat": "视频", "name": "Spotify", "url": "open.spotify.com", "domains": ["spotify.com", "scdn.co", "spotifycdn.com"] },
+  { "id": "tiktok", "cat": "视频", "name": "TikTok", "url": "www.tiktok.com", "domains": ["tiktok.com", "tiktokcdn.com", "tiktokv.com", "ttwstatic.com"] },
+
+  { "id": "x", "cat": "社交", "name": "X (Twitter)", "url": "x.com", "domains": ["x.com", "twitter.com", "twimg.com", "t.co"] },
+  { "id": "instagram", "cat": "社交", "name": "Instagram", "url": "www.instagram.com", "domains": ["instagram.com", "cdninstagram.com"] },
+  { "id": "facebook", "cat": "社交", "name": "Facebook", "url": "www.facebook.com", "domains": ["facebook.com", "fb.com", "fbcdn.net", "facebook.net"] },
+  { "id": "telegram", "cat": "社交", "name": "Telegram", "url": "telegram.org", "domains": ["telegram.org", "t.me", "telegram.me", "telesco.pe", "tdesktop.com"] },
+  { "id": "discord", "cat": "社交", "name": "Discord", "url": "discord.com", "domains": ["discord.com", "discordapp.com", "discordapp.net", "discord.gg", "discord.media"] },
+  { "id": "reddit", "cat": "社交", "name": "Reddit", "url": "www.reddit.com", "domains": ["reddit.com", "redd.it", "redditmedia.com", "redditstatic.com"] },
+
+  { "id": "google", "cat": "常用", "name": "Google", "url": "www.google.com", "domains": ["google.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "gvt1.com"] },
+  { "id": "github", "cat": "常用", "name": "GitHub", "url": "github.com", "domains": ["github.com", "githubusercontent.com", "githubassets.com", "github.io"] },
+  { "id": "wikipedia", "cat": "常用", "name": "Wikipedia", "url": "zh.wikipedia.org", "domains": ["wikipedia.org", "wikimedia.org", "wikidata.org"] },
+  { "id": "apple", "cat": "常用", "name": "Apple", "url": "www.apple.com", "domains": ["apple.com", "icloud.com", "mzstatic.com"] },
+  { "id": "microsoft", "cat": "常用", "name": "Microsoft", "url": "www.microsoft.com", "domains": ["microsoft.com", "live.com", "office.com", "bing.com"] },
+
+  { "id": "scholar", "cat": "科研", "name": "Google Scholar", "url": "scholar.google.com", "domains": ["scholar.google.com", "scholar.googleusercontent.com"] },
+  { "id": "pubmed", "cat": "科研", "name": "PubMed", "url": "pubmed.ncbi.nlm.nih.gov", "domains": ["ncbi.nlm.nih.gov", "nih.gov"] },
+  { "id": "wos", "cat": "科研", "name": "Web of Science", "url": "www.webofscience.com", "domains": ["webofscience.com", "clarivate.com"] },
+  { "id": "sciencedirect", "cat": "科研", "name": "ScienceDirect", "url": "www.sciencedirect.com", "domains": ["sciencedirect.com", "elsevier.com", "sciencedirectassets.com"] },
+  { "id": "nature", "cat": "科研", "name": "Nature", "url": "www.nature.com", "domains": ["nature.com", "springer.com", "springernature.com"] },
+  { "id": "arxiv", "cat": "科研", "name": "arXiv", "url": "arxiv.org", "domains": ["arxiv.org"] },
+  { "id": "cnki", "cat": "科研", "name": "中国知网", "url": "www.cnki.net", "domains": ["cnki.net"] },
+
+  { "id": "bilibili", "cat": "国内", "name": "哔哩哔哩", "url": "www.bilibili.com", "domains": ["bilibili.com", "hdslb.com", "bilivideo.com", "biliapi.net"] },
+  { "id": "baidu", "cat": "国内", "name": "百度", "url": "www.baidu.com", "domains": ["baidu.com", "bdstatic.com"] },
+  { "id": "taobao", "cat": "国内", "name": "淘宝", "url": "www.taobao.com", "domains": ["taobao.com", "tmall.com", "alicdn.com"] },
+  { "id": "zhihu", "cat": "国内", "name": "知乎", "url": "www.zhihu.com", "domains": ["zhihu.com", "zhimg.com"] },
+  { "id": "weixin", "cat": "国内", "name": "微信", "url": "weixin.qq.com", "domains": ["weixin.qq.com", "wechat.com"] },
+  { "id": "xiaohongshu", "cat": "国内", "name": "小红书", "url": "www.xiaohongshu.com", "domains": ["xiaohongshu.com", "xhscdn.com"] }
+]

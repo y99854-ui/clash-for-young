@@ -1,0 +1,855 @@
+//! 软件状态和界面调用的全部命令。
+
+use crate::check::{self, Api, CheckResult};
+use crate::configgen::{self, GenInput, GROUP_DEFAULT};
+use crate::core::{self, Core};
+use crate::settings::{self, CustomRule, CustomSite, NodeGroup, Settings, Subscription};
+use crate::sites::{self, Site};
+use crate::subscription::{self, Parsed, Region};
+use crate::sysproxy_ctl;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tauri::State;
+
+pub struct AppState {
+    pub dir: PathBuf,
+    pub settings: Mutex<Settings>,
+    pub parsed: Mutex<Parsed>,
+    pub core: Arc<Core>,
+    pub geo_resource_dir: Option<PathBuf>,
+    pub connected: AtomicBool,
+    /// 修改类操作排队执行，避免两次写配置互相覆盖
+    pub op: tokio::sync::Mutex<()>,
+}
+
+const GEO_FILES: &[(&str, &str)] = &[
+    // (内核要的文件名, 下载地址里的文件名)
+    ("GeoSite.dat", "geosite.dat"),
+    ("geoip.metadb", "country-lite.mmdb"),
+];
+const GEO_MIRRORS: &[&str] = &[
+    "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/",
+    "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/",
+    "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/",
+];
+
+fn sub_file(dir: &Path, i: usize) -> PathBuf {
+    dir.join(format!("subscription-{i}.yaml"))
+}
+
+impl AppState {
+    pub fn new(dir: PathBuf, geo_resource_dir: Option<PathBuf>) -> AppState {
+        let _ = std::fs::create_dir_all(dir.join("core"));
+        let settings = settings::load(&dir);
+        let parsed = std::fs::read_to_string(sub_file(&dir, 0))
+            .ok()
+            .and_then(|t| subscription::parse(&t, &settings.node_groups()).ok())
+            .unwrap_or_default();
+        let _ = settings::save(&dir, &settings);
+        let core = Core::new(dir.join("core"));
+        AppState {
+            dir,
+            settings: Mutex::new(settings),
+            parsed: Mutex::new(parsed),
+            core,
+            geo_resource_dir,
+            connected: AtomicBool::new(false),
+            op: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    pub fn api(&self) -> Api {
+        let s = self.settings.lock().unwrap();
+        Api { controller: format!("127.0.0.1:{}", s.controller_port), secret: s.secret.clone(), mixed_port: s.mixed_port }
+    }
+
+    fn save_settings(&self) -> Result<(), String> {
+        let s = self.settings.lock().unwrap().clone();
+        settings::save(&self.dir, &s)
+    }
+
+    fn geo_ready(&self) -> bool {
+        GEO_FILES.iter().all(|(n, _)| self.core.workdir().join(n).exists())
+    }
+
+    /// 准备地理数据：先用安装包里带的，没有再下载
+    async fn ensure_geo(&self) -> bool {
+        let wd = self.core.workdir().to_path_buf();
+        for (name, remote) in GEO_FILES {
+            let dst = wd.join(name);
+            if dst.exists() {
+                continue;
+            }
+            if let Some(res) = &self.geo_resource_dir {
+                for cand in [res.join(name), res.join(remote)] {
+                    if cand.exists() && std::fs::copy(&cand, &dst).is_ok() {
+                        break;
+                    }
+                }
+            }
+            if dst.exists() {
+                continue;
+            }
+            let client = match reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(60)).build() {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            for m in GEO_MIRRORS {
+                if let Ok(r) = client.get(format!("{m}{remote}")).send().await {
+                    if r.status().is_success() {
+                        if let Ok(b) = r.bytes().await {
+                            if b.len() > 1000 {
+                                let tmp = wd.join(format!("{name}.part"));
+                                if std::fs::write(&tmp, &b).is_ok() && std::fs::rename(&tmp, &dst).is_ok() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.geo_ready()
+    }
+
+    /// 按当前设置生成配置文件。返回走向失效的条目。
+    fn write_config(&self) -> Result<Vec<String>, String> {
+        let st = self.settings.lock().unwrap().clone();
+        let parsed = self.parsed.lock().unwrap().clone();
+        let sites = sites::catalog(&st);
+        let out = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: self.geo_ready() });
+        let path = self.core.config_path();
+        let tmp = path.with_extension("yaml.tmp");
+        std::fs::write(&tmp, out.yaml).map_err(|e| format!("无法写入配置：{e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| format!("无法写入配置：{e}"))?;
+        Ok(out.fallbacks)
+    }
+
+    /// 写配置并让正在运行的内核重新加载；domains 里的网站断开旧连接
+    async fn apply(&self, domains: &[String]) -> Result<Vec<String>, String> {
+        let fallbacks = self.write_config()?;
+        let api = self.api();
+        if self.core.is_running() {
+            self.core.reload(&api).await?;
+            let _ = core::close_connections_for(&api, domains).await;
+        }
+        Ok(fallbacks)
+    }
+
+    /// 内核没运行时，确认端口可用，被占用就换一个
+    fn ensure_ports(&self) -> Result<(), String> {
+        let mut s = self.settings.lock().unwrap();
+        let mut changed = false;
+        if !core::port_free(s.mixed_port) {
+            s.mixed_port = core::pick_port(7899, s.controller_port);
+            changed = true;
+        }
+        if !core::port_free(s.controller_port) {
+            s.controller_port = core::pick_port(9098, s.mixed_port);
+            changed = true;
+        }
+        let snapshot = s.clone();
+        drop(s);
+        if changed {
+            settings::save(&self.dir, &snapshot)?;
+        }
+        Ok(())
+    }
+
+    async fn start_core(&self) -> Result<(), String> {
+        if self.core.is_running() {
+            return Ok(());
+        }
+        if self.parsed.lock().unwrap().proxies.is_empty() {
+            return Err("还没有添加订阅。".into());
+        }
+        self.ensure_ports()?;
+        self.ensure_geo().await;
+        self.write_config()?;
+        self.core.start(&self.api()).await
+    }
+
+    pub async fn connect(&self) -> Result<(), String> {
+        self.start_core().await?;
+        let port = self.settings.lock().unwrap().mixed_port;
+        sysproxy_ctl::enable(&self.dir, port)?;
+        self.connected.store(true, Ordering::SeqCst);
+        self.settings.lock().unwrap().was_connected = true;
+        self.save_settings()
+    }
+
+    /// 断开：恢复系统代理、停止内核。remember=false 用于退出软件（下次打开仍自动连接）
+    pub fn disconnect(&self, remember: bool) -> Result<(), String> {
+        let port = self.settings.lock().unwrap().mixed_port;
+        let was = self.connected.swap(false, Ordering::SeqCst);
+        let r = if was || sysproxy_ctl::is_on(port) { sysproxy_ctl::disable(&self.dir, port) } else { Ok(()) };
+        self.core.stop();
+        if remember {
+            self.settings.lock().unwrap().was_connected = false;
+            let _ = self.save_settings();
+        }
+        r
+    }
+
+    async fn load_subscription(&self, url: &str) -> Result<(), String> {
+        let via = if self.core.is_running() { Some(self.settings.lock().unwrap().mixed_port) } else { None };
+        let fetched = subscription::fetch(url, via).await?;
+        let groups = self.settings.lock().unwrap().node_groups();
+        let parsed = subscription::parse(&fetched.text, &groups)?;
+        std::fs::write(sub_file(&self.dir, 0), &fetched.text).map_err(|e| format!("无法保存订阅：{e}"))?;
+        *self.parsed.lock().unwrap() = parsed;
+        {
+            let mut s = self.settings.lock().unwrap();
+            let sub = Subscription { url: url.trim().to_string(), updated_at: settings::now_ms(), usage: fetched.usage };
+            if s.subscriptions.is_empty() {
+                s.subscriptions.push(sub);
+            } else {
+                s.subscriptions[0] = sub;
+            }
+        }
+        self.save_settings()
+    }
+}
+
+// ───────────────────────── 给界面的数据 ─────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteView {
+    #[serde(flatten)]
+    pub site: Site,
+    /// 用户选的走向，"" 表示自动
+    pub choice: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupView {
+    #[serde(flatten)]
+    pub def: NodeGroup,
+    pub flag: String,
+    /// 目前归入这个分组的节点
+    pub matched: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StateView {
+    pub subscription: Option<Subscription>,
+    /// 有节点的分组（可选的走向）
+    pub regions: Vec<Region>,
+    /// 全部分组的定义和匹配结果（分组管理用）
+    pub groups: Vec<GroupView>,
+    pub node_count: usize,
+    pub default_target: String,
+    pub sites: Vec<SiteView>,
+    pub custom_rules: Vec<CustomRule>,
+    pub running: bool,
+    pub connected: bool,
+    pub mixed_port: u16,
+    pub controller_port: u16,
+    pub error: Option<String>,
+    /// 走向已失效（订阅里没有了）的条目
+    pub fallbacks: Vec<String>,
+    pub geo_ready: bool,
+    pub data_dir: String,
+}
+
+fn state_view(app: &AppState) -> StateView {
+    let st = app.settings.lock().unwrap().clone();
+    let parsed = app.parsed.lock().unwrap().clone();
+    let sites = sites::catalog(&st);
+    let fallbacks = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true }).fallbacks;
+    let sites = sites
+        .into_iter()
+        .map(|s| SiteView { choice: st.site_choices.get(&s.id).cloned().unwrap_or_default(), site: s })
+        .collect();
+    let running = app.core.is_running();
+    StateView {
+        subscription: st.subscriptions.first().cloned(),
+        node_count: parsed.proxies.len(),
+        regions: parsed.regions.clone(),
+        groups: st
+            .node_groups()
+            .into_iter()
+            .map(|g| {
+                let matched = parsed.all_groups.iter().find(|r| r.id == g.id).map(|r| r.nodes.clone()).unwrap_or_default();
+                GroupView { flag: subscription::flag_of_group(&g), def: g, matched }
+            })
+            .collect(),
+        default_target: st.default_target.clone(),
+        sites,
+        custom_rules: st.custom_rules.clone(),
+        running,
+        connected: app.connected.load(Ordering::SeqCst) && running,
+        mixed_port: st.mixed_port,
+        controller_port: st.controller_port,
+        error: app.core.last_error.lock().unwrap().clone(),
+        fallbacks,
+        geo_ready: app.geo_ready(),
+        data_dir: app.dir.to_string_lossy().to_string(),
+    }
+}
+
+// ───────────────────────── 命令 ─────────────────────────
+
+type S<'a> = State<'a, AppState>;
+
+#[tauri::command]
+pub fn get_state(app: S) -> StateView {
+    state_view(&app)
+}
+
+#[tauri::command]
+pub async fn set_subscription(app: S<'_>, url: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.load_subscription(&url).await?;
+    if app.core.is_running() {
+        app.apply(&[]).await?;
+    } else {
+        app.write_config()?;
+    }
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn refresh_subscription(app: S<'_>) -> Result<StateView, String> {
+    let url = app.settings.lock().unwrap().subscriptions.first().map(|s| s.url.clone());
+    let Some(url) = url else { return Err("还没有添加订阅。".into()) };
+    set_subscription(app, url).await
+}
+
+#[tauri::command]
+pub async fn connect(app: S<'_>) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.connect().await?;
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn disconnect(app: S<'_>) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.disconnect(true)?;
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn set_default_target(app: S<'_>, target: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.settings.lock().unwrap().default_target = target.clone();
+    app.save_settings()?;
+    app.write_config()?;
+    if app.core.is_running() {
+        let api = app.api();
+        let resolved = {
+            let parsed = app.parsed.lock().unwrap();
+            configgen::resolve_target(&target, &parsed).ok().flatten()
+        };
+        if let Some(name) = resolved {
+            core::select(&api, GROUP_DEFAULT, &name).await?;
+        }
+        core::close_all_connections(&api).await;
+    }
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn set_site_choice(app: S<'_>, id: String, target: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let domains = {
+        let mut s = app.settings.lock().unwrap();
+        if target.is_empty() {
+            s.site_choices.remove(&id);
+        } else {
+            s.site_choices.insert(id.clone(), target);
+        }
+        sites::catalog(&s).into_iter().find(|x| x.id == id).map(|x| x.domains).unwrap_or_default()
+    };
+    app.save_settings()?;
+    app.apply(&domains).await?;
+    Ok(state_view(&app))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub url: String,
+    pub domains: Vec<String>,
+}
+
+fn clean_domains(list: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for d in list {
+        for part in d.split(|c: char| c == ',' || c == '，' || c.is_whitespace()) {
+            if let Some(n) = sites::normalize_domain(part) {
+                if !out.contains(&n) {
+                    out.push(n);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 添加或修改网站。内置网站只能改域名。
+#[tauri::command]
+pub async fn save_site(app: S<'_>, site: SiteInput) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let mut domains = clean_domains(&site.domains);
+    let url_domain = sites::normalize_domain(&site.url);
+    if domains.is_empty() {
+        if let Some(d) = &url_domain {
+            domains.push(d.clone());
+        }
+    }
+    if domains.is_empty() {
+        return Err("请至少填写一个有效的域名，例如 example.com".into());
+    }
+    let mut all_domains = domains.clone();
+    {
+        let mut s = app.settings.lock().unwrap();
+        let builtin = sites::builtin().iter().find(|b| Some(&b.id) == site.id.as_ref()).cloned();
+        if let Some(b) = builtin {
+            all_domains.extend(b.domains.clone());
+            if domains == b.domains {
+                s.site_domains.remove(&b.id);
+            } else {
+                s.site_domains.insert(b.id.clone(), domains);
+            }
+        } else if let Some(c) = site.id.as_ref().and_then(|id| s.custom_sites.iter_mut().find(|c| &c.id == id)) {
+            all_domains.extend(c.domains.clone());
+            c.name = if site.name.trim().is_empty() { domains[0].clone() } else { site.name.trim().into() };
+            c.url = url_domain.clone().unwrap_or_else(|| domains[0].clone());
+            c.domains = domains;
+        } else {
+            let name = if site.name.trim().is_empty() { domains[0].clone() } else { site.name.trim().to_string() };
+            let url = url_domain.unwrap_or_else(|| domains[0].clone());
+            s.custom_sites.push(CustomSite { id: format!("c{}", settings::now_ms()), name, url, domains });
+        }
+    }
+    app.save_settings()?;
+    app.apply(&all_domains).await?;
+    Ok(state_view(&app))
+}
+
+/// 删除自己添加的网站；对内置网站则是恢复默认域名
+#[tauri::command]
+pub async fn delete_site(app: S<'_>, id: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let domains = {
+        let mut s = app.settings.lock().unwrap();
+        let d = sites::catalog(&s).into_iter().find(|x| x.id == id).map(|x| x.domains).unwrap_or_default();
+        if s.custom_sites.iter().any(|c| c.id == id) {
+            s.custom_sites.retain(|c| c.id != id);
+            s.site_choices.remove(&id);
+        } else {
+            s.site_domains.remove(&id);
+        }
+        d
+    };
+    app.save_settings()?;
+    app.apply(&domains).await?;
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn set_custom_rules(app: S<'_>, rules: Vec<CustomRule>) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let mut cleaned = vec![];
+    for r in rules {
+        let mut r = r;
+        r.value = r.value.trim().to_string();
+        if r.value.is_empty() {
+            continue;
+        }
+        if configgen::rule_line(&r, "DIRECT").is_none() {
+            return Err(format!("规则「{}」格式不对：不能包含逗号或空格。", r.value));
+        }
+        if r.kind == "ipcidr" && !looks_like_ip(&r.value) {
+            return Err(format!("「{}」不是有效的 IP 或 IP 段，例如 1.2.3.0/24", r.value));
+        }
+        cleaned.push(r);
+    }
+    let mut domains: Vec<String> = app.settings.lock().unwrap().custom_rules.iter().map(|r| r.value.clone()).collect();
+    domains.extend(cleaned.iter().map(|r| r.value.clone()));
+    app.settings.lock().unwrap().custom_rules = cleaned;
+    app.save_settings()?;
+    app.apply(&domains).await?;
+    Ok(state_view(&app))
+}
+
+fn looks_like_ip(v: &str) -> bool {
+    let (ip, mask) = match v.split_once('/') {
+        Some((a, b)) => (a, Some(b)),
+        None => (v, None),
+    };
+    let ok_ip = ip.parse::<std::net::IpAddr>().is_ok();
+    let ok_mask = mask.map(|m| m.parse::<u8>().map(|n| n <= 128).unwrap_or(false)).unwrap_or(true);
+    ok_ip && ok_mask
+}
+
+// ───────────────────────── 节点分组 ─────────────────────────
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupInput {
+    pub id: Option<String>,
+    pub name: String,
+    /// 关键词，逗号、空格或换行分隔
+    pub keywords: String,
+    pub nodes: Vec<String>,
+}
+
+fn split_keywords(s: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    for k in s.split(|c: char| c == ',' || c == '，' || c == '、' || c == '\n' || c == '|') {
+        let k = k.trim().to_string();
+        if !k.is_empty() && !out.contains(&k) {
+            out.push(k);
+        }
+    }
+    out
+}
+
+/// 把设置里引用旧分组名的地方（默认地区、网站选择、自定义规则）改成新名字
+fn rename_refs(s: &mut Settings, old: &str, new: &str) {
+    let (o, n) = (format!("region:{old}"), format!("region:{new}"));
+    if s.default_target == o {
+        s.default_target = n.clone();
+    }
+    for v in s.site_choices.values_mut() {
+        if *v == o {
+            *v = n.clone();
+        }
+    }
+    for r in s.custom_rules.iter_mut() {
+        if r.target == o {
+            r.target = n.clone();
+        }
+    }
+}
+
+impl AppState {
+    fn regroup(&self) {
+        let defs = self.settings.lock().unwrap().node_groups();
+        self.parsed.lock().unwrap().apply_groups(&defs);
+    }
+}
+
+/// 预览：按这些关键词和手动挑选的节点，会归入哪些节点
+#[tauri::command]
+pub fn preview_group(app: S, keywords: String, nodes: Vec<String>) -> Vec<String> {
+    let g = NodeGroup { id: String::new(), name: String::new(), keywords: split_keywords(&keywords), nodes };
+    app.parsed.lock().unwrap().node_names().into_iter().filter(|n| subscription::group_matches(&g, n)).collect()
+}
+
+/// 新建或修改分组
+#[tauri::command]
+pub async fn save_group(app: S<'_>, group: GroupInput) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    let name = group.name.trim().to_string();
+    if name.is_empty() {
+        return Err("请填写分组名称。".into());
+    }
+    if name.contains(',') || name.contains('\n') {
+        return Err("分组名称不能包含逗号或换行。".into());
+    }
+    if subscription::reserved_names().contains(&name) {
+        return Err(format!("「{name}」是软件保留的名字，请换一个。"));
+    }
+    if app.parsed.lock().unwrap().node_names().contains(&name) {
+        return Err(format!("「{name}」和某个节点同名，请换一个名字。"));
+    }
+    let keywords = split_keywords(&group.keywords);
+    if keywords.is_empty() && group.nodes.is_empty() {
+        return Err("请填写至少一个关键词，或手动选择至少一个节点。".into());
+    }
+    {
+        let mut s = app.settings.lock().unwrap();
+        let mut list = s.node_groups();
+        if list.iter().any(|g| g.name == name && Some(&g.id) != group.id.as_ref()) {
+            return Err(format!("已经有名为「{name}」的分组了。"));
+        }
+        let mut rename = None;
+        match group.id.as_ref().and_then(|id| list.iter_mut().find(|g| &g.id == id)) {
+            Some(g) => {
+                if g.name != name {
+                    rename = Some(g.name.clone());
+                }
+                g.name = name.clone();
+                g.keywords = keywords;
+                g.nodes = group.nodes;
+            }
+            None => list.push(NodeGroup { id: format!("g{}", settings::now_ms()), name: name.clone(), keywords, nodes: group.nodes }),
+        }
+        s.groups = Some(list);
+        if let Some(old) = rename {
+            rename_refs(&mut s, &old, &name);
+        }
+    }
+    app.save_settings()?;
+    app.regroup();
+    app.apply(&[]).await?;
+    if app.core.is_running() {
+        core::close_all_connections(&app.api()).await;
+    }
+    Ok(state_view(&app))
+}
+
+#[tauri::command]
+pub async fn delete_group(app: S<'_>, id: String) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    {
+        let mut s = app.settings.lock().unwrap();
+        let mut list = s.node_groups();
+        list.retain(|g| g.id != id);
+        s.groups = Some(list);
+    }
+    app.save_settings()?;
+    app.regroup();
+    app.apply(&[]).await?;
+    Ok(state_view(&app))
+}
+
+/// 调整分组顺序：delta = -1 上移，1 下移
+#[tauri::command]
+pub async fn move_group(app: S<'_>, id: String, delta: i32) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    {
+        let mut s = app.settings.lock().unwrap();
+        let mut list = s.node_groups();
+        if let Some(i) = list.iter().position(|g| g.id == id) {
+            let j = i as i32 + delta;
+            if j >= 0 && (j as usize) < list.len() {
+                list.swap(i, j as usize);
+            }
+        }
+        s.groups = Some(list);
+    }
+    app.save_settings()?;
+    app.regroup();
+    app.apply(&[]).await?;
+    Ok(state_view(&app))
+}
+
+/// 恢复默认的“美国”“台湾”两个分组
+#[tauri::command]
+pub async fn reset_groups(app: S<'_>) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.settings.lock().unwrap().groups = None;
+    app.save_settings()?;
+    app.regroup();
+    app.apply(&[]).await?;
+    Ok(state_view(&app))
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    pub running: bool,
+    pub connected: bool,
+    /// 默认地区组当前选的（地区名 / 节点名 / 自动选择）
+    pub selected: String,
+    /// 最终用的节点
+    pub node: String,
+    pub region: String,
+    pub flag: String,
+    pub delay: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn status(app: S<'_>, with_delay: bool) -> Result<Status, String> {
+    let running = app.core.is_running();
+    let mut st = Status {
+        running,
+        connected: running && app.connected.load(Ordering::SeqCst),
+        error: app.core.last_error.lock().unwrap().clone(),
+        ..Default::default()
+    };
+    if !running {
+        return Ok(st);
+    }
+    let api = app.api();
+    let Ok(all) = check::api_get(&api, "/proxies").await else { return Ok(st) };
+    let pmap = &all["proxies"];
+    st.selected = check::str_of(&pmap[GROUP_DEFAULT], "now");
+    // 一路找到真正的节点
+    let mut cur = st.selected.clone();
+    for _ in 0..5 {
+        let next = check::str_of(&pmap[&cur], "now");
+        if next.is_empty() {
+            break;
+        }
+        cur = next;
+    }
+    st.node = cur.clone();
+    if cur == "DIRECT" {
+        st.region = "直连".into();
+    } else if let Some(r) = app.parsed.lock().unwrap().region_of(&cur) {
+        st.region = r.name.clone();
+        st.flag = r.flag.clone();
+    }
+    if with_delay && cur != "DIRECT" && !cur.is_empty() {
+        let path = format!(
+            "/proxies/{}/delay?timeout=5000&url={}",
+            urlencoding::encode(&cur),
+            urlencoding::encode("https://www.gstatic.com/generate_204")
+        );
+        st.delay = check::api_get(&api, &path).await.ok().and_then(|v| v["delay"].as_u64());
+    }
+    Ok(st)
+}
+
+/// 测所有节点的延迟，返回 {节点名: 毫秒}，失败的不在里面
+#[tauri::command]
+pub async fn node_delays(app: S<'_>) -> Result<Value, String> {
+    if !app.core.is_running() {
+        return Err("请先连接。".into());
+    }
+    core::group_delay(&app.api(), configgen::GROUP_FASTEST).await
+}
+
+#[tauri::command]
+pub async fn check_url(app: S<'_>, url: String) -> Result<CheckResult, String> {
+    if !app.core.is_running() {
+        return Err("请先在首页点「连接」。".into());
+    }
+    check::inspect(app.api(), url, true).await
+}
+
+#[tauri::command]
+pub fn core_log(app: S) -> String {
+    app.core.log_tail()
+}
+
+#[tauri::command]
+pub fn current_config(app: S) -> String {
+    std::fs::read_to_string(app.core.config_path()).unwrap_or_default()
+}
+
+/// 改端口（高级）
+#[tauri::command]
+pub async fn set_ports(app: S<'_>, mixed_port: u16, controller_port: u16) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    if mixed_port < 1024 || controller_port < 1024 || mixed_port == controller_port {
+        return Err("端口需在 1024–65535 之间，且两个端口不能相同。".into());
+    }
+    let was_connected = app.connected.load(Ordering::SeqCst);
+    let was_running = app.core.is_running();
+    app.disconnect(false)?;
+    {
+        let mut s = app.settings.lock().unwrap();
+        s.mixed_port = mixed_port;
+        s.controller_port = controller_port;
+    }
+    app.save_settings()?;
+    if was_connected {
+        app.connect().await?;
+    } else if was_running {
+        app.start_core().await?;
+    }
+    Ok(state_view(&app))
+}
+
+/// 启动时：恢复上次崩溃留下的系统代理；上次是连接状态就自动连接
+pub async fn on_startup(app: &AppState) {
+    let (port, was) = {
+        let s = app.settings.lock().unwrap();
+        (s.mixed_port, s.was_connected)
+    };
+    sysproxy_ctl::recover_on_startup(&app.dir, port);
+    if was && !app.parsed.lock().unwrap().proxies.is_empty() {
+        let _g = app.op.lock().await;
+        if let Err(e) = app.connect().await {
+            *app.core.last_error.lock().unwrap() = Some(e);
+        }
+    }
+}
+
+#[cfg(test)]
+mod e2e {
+    //! 需要真实 mihomo（CFY_MIHOMO）、本地订阅服务（CFY_SUB_URL）。运行：cargo test -- --ignored
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn full_flow() {
+        let sub = std::env::var("CFY_SUB_URL").expect("CFY_SUB_URL");
+        let dir = std::env::temp_dir().join(format!("cfy-e2e-{}", settings::now_ms()));
+        let geo = std::env::var("CFY_GEO").ok().map(PathBuf::from);
+        let app = AppState::new(dir.clone(), geo);
+        {
+            let mut s = app.settings.lock().unwrap();
+            s.mixed_port = 17899;
+            s.controller_port = 19098;
+            let mut g = subscription::default_groups();
+            for (id, name, kw) in [("jp", "日本", "日本"), ("sg", "新加坡", "SG"), ("hk", "香港", "香港")] {
+                g.push(NodeGroup { id: id.into(), name: name.into(), keywords: vec![kw.into()], nodes: vec![] });
+            }
+            s.groups = Some(g);
+        }
+        app.load_subscription(&sub).await.unwrap();
+        let p = app.parsed.lock().unwrap().clone();
+        let names: Vec<_> = p.regions.iter().map(|r| r.name.clone()).collect();
+        println!("regions: {names:?}");
+        assert_eq!(names, vec!["美国", "日本", "新加坡", "香港", "其他"]);
+        assert_eq!(app.settings.lock().unwrap().subscriptions[0].usage.as_ref().unwrap().total, 107374182400);
+
+        app.start_core().await.expect("core start");
+        assert!(app.core.is_running());
+        assert!(app.geo_ready(), "geo files should be copied");
+
+        // 网站选择：Discord 走日本
+        app.settings.lock().unwrap().site_choices.insert("discord".into(), "region:日本".into());
+        app.apply(&["discord.com".into()]).await.expect("reload");
+        let r = check::inspect(app.api(), "http://discord.com:18081".into(), false).await.expect("check");
+        println!("discord: rule={} {} chains={:?}", r.rule, r.rule_payload, r.chains);
+        assert_eq!(r.rule_payload, "discord.com");
+        assert!(r.chains.contains(&"日本".to_string()));
+        assert_eq!(r.node, "🇯🇵 日本 东京");
+
+        // 具体节点
+        app.settings.lock().unwrap().site_choices.insert("discord".into(), "node:US 洛杉矶 01".into());
+        app.apply(&["discord.com".into()]).await.unwrap();
+        let r = check::inspect(app.api(), "http://discord.com:18081".into(), false).await.unwrap();
+        assert_eq!(r.node, "US 洛杉矶 01");
+
+        // 自定义规则优先于网站选择
+        app.settings.lock().unwrap().custom_rules =
+            vec![CustomRule { kind: "suffix".into(), value: "discord.com".into(), target: "region:新加坡".into() }];
+        app.apply(&["discord.com".into()]).await.unwrap();
+        let r = check::inspect(app.api(), "http://discord.com:18081".into(), false).await.unwrap();
+        assert_eq!(r.node, "SG-Premium");
+
+        // 国内直连（GEOSITE）：规则已加载
+        assert!(app.core.log_tail().contains("GeoSite rule cn"));
+        assert!(std::fs::read_to_string(app.core.config_path()).unwrap().contains("GEOSITE,cn,DIRECT"));
+
+        // 默认地区切到香港
+        app.settings.lock().unwrap().default_target = "region:香港".into();
+        app.settings.lock().unwrap().custom_rules
+            .push(CustomRule { kind: "keyword".into(), value: "example".into(), target: "default".into() });
+        app.apply(&[]).await.unwrap();
+        core::select(&app.api(), GROUP_DEFAULT, "香港").await.unwrap();
+        let r = check::inspect(app.api(), "http://example.org:18081".into(), false).await.unwrap();
+        println!("example: rule={} chains={:?}", r.rule, r.chains);
+        assert!(r.chains.contains(&"香港".to_string()));
+
+        // 内核被杀后自动重启
+        let pid_before = app.core.is_running();
+        assert!(pid_before);
+        std::process::Command::new("pkill").args(["-f", &dir.to_string_lossy()]).status().unwrap();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(app.core.is_running(), "should auto restart");
+
+        app.core.stop();
+        assert!(!app.core.is_running());
+    }
+}
