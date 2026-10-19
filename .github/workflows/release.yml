@@ -1,0 +1,74 @@
+# 自动打包：Mac 通用版（Intel + Apple 芯片）和 Windows 安装包，并附到对应的 GitHub 发布页。
+# 触发方式：
+#   1. 推送 v 开头的标签（如 git tag v0.1.0 && git push origin v0.1.0）
+#   2. 在仓库 Actions 页面手动运行，填入发布标签
+name: 打包发布
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "发布标签，如 v0.1.0"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+            args: --target universal-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      # 由小猫原图生成各尺寸的应用图标（icns / ico / png）
+      - run: npx tauri icon src-tauri/icons/app-icon.png
+
+      # 下载 mihomo 内核和地理数据，打进安装包
+      - run: node scripts/fetch-deps.mjs --target ${{ matrix.target }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 单元测试（只在 Mac 上跑一次）
+      - if: matrix.platform == 'macos-latest'
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ env.TAG }}
+          releaseName: Clash for Young ${{ env.TAG }}
+          releaseDraft: false
+          args: ${{ matrix.args }}
+          assetNamePattern: clash-for-young_${{ env.TAG }}_[arch][setup][ext]
