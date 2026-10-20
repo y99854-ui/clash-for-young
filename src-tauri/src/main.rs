@@ -10,6 +10,7 @@ mod sites;
 mod subscription;
 mod sysproxy_ctl;
 mod tray;
+mod tun;
 
 use app::AppState;
 use std::time::Duration;
@@ -82,6 +83,8 @@ fn main() {
             app::delete_group,
             app::move_group,
             app::reset_groups,
+            app::set_tun,
+            app::relaunch_as_admin,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")

@@ -26,6 +26,8 @@ pub struct GenInput<'a> {
     pub sites: &'a [Site],
     /// 地理数据文件是否就绪（GeoSite.dat 和 geoip.metadb）
     pub geo_ready: bool,
+    /// 开启 TUN（已开启且内核有权限时才为真）
+    pub tun: bool,
 }
 
 pub struct GenOutput {
@@ -216,6 +218,14 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ("mmdb", s("https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country-lite.mmdb")),
     ]);
     let profile = map(vec![("store-selected", Value::from(false))]);
+    let tun = map(vec![
+        ("enable", Value::from(input.tun)),
+        ("stack", s("mixed")),
+        ("auto-route", Value::from(true)),
+        ("auto-detect-interface", Value::from(true)),
+        ("strict-route", Value::from(false)),
+        ("dns-hijack", seq(vec!["any:53".into()])),
+    ]);
 
     let proxies: Vec<Value> = parsed.proxies.iter().cloned().map(Value::Mapping).collect();
     let root = map(vec![
@@ -233,6 +243,7 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ("geox-url", geox),
         ("profile", profile),
         ("dns", dns),
+        ("tun", tun),
         ("proxies", Value::Sequence(proxies)),
         ("proxy-groups", Value::Sequence(groups)),
         ("rules", seq(rules)),
@@ -287,7 +298,7 @@ proxies:
         st.site_choices.insert("netflix".into(), "region:美国".into()); // 没有美国节点
         st.custom_rules.push(CustomRule { kind: "keyword".into(), value: "openai".into(), target: "DIRECT".into() });
         let sites = crate::sites::catalog(&st);
-        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true });
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false });
         let v: Value = serde_yaml::from_str(&out.yaml).unwrap();
         let rules: Vec<String> =
             v["rules"].as_sequence().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
@@ -308,10 +319,11 @@ proxies:
         let parsed = sample();
         let mut st = Settings::default();
         st.default_target = "region:日本".into();
-        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &[], geo_ready: false });
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &[], geo_ready: false, tun: true });
         let v: Value = serde_yaml::from_str(&out.yaml).unwrap();
         assert_eq!(v["proxy-groups"][0]["proxies"][0].as_str().unwrap(), "日本");
         assert!(!out.yaml.contains("GEOSITE"));
+        assert_eq!(v["tun"]["enable"].as_bool(), Some(true));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::settings::{self, CustomRule, CustomSite, NodeGroup, Settings, Subscri
 use crate::sites::{self, Site};
 use crate::subscription::{self, Parsed, Region};
 use crate::sysproxy_ctl;
+use crate::tun;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -145,7 +146,7 @@ impl AppState {
         let st = self.settings.lock().unwrap().clone();
         let parsed = self.parsed.lock().unwrap().clone();
         let sites = sites::catalog(&st);
-        let out = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: self.geo_ready() });
+        let out = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: self.geo_ready(), tun: self.tun_active() });
         let path = self.core.config_path();
         let tmp = path.with_extension("yaml.tmp");
         std::fs::write(&tmp, out.yaml).map_err(|e| format!("无法写入配置：{e}"))?;
@@ -217,6 +218,25 @@ impl AppState {
             let _ = self.save_settings();
         }
         r
+    }
+
+    /// 增强模式是否真正生效（打开了且有权限）
+    fn tun_active(&self) -> bool {
+        self.settings.lock().unwrap().tun_enabled && tun::privileged(self.core.binary())
+    }
+
+    /// 重启内核让新设置生效（TUN 开关需要重启），保持原来的连接状态
+    async fn restart_core(&self) -> Result<(), String> {
+        if !self.core.is_running() {
+            return self.write_config().map(|_| ());
+        }
+        let was_connected = self.connected.load(Ordering::SeqCst);
+        self.core.stop();
+        if was_connected {
+            self.connect().await
+        } else {
+            self.start_core().await
+        }
     }
 
     /// 读取全部订阅文件，合并节点、重新分组
@@ -337,6 +357,17 @@ pub struct GroupView {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TunView {
+    /// 用户打开了增强模式
+    pub enabled: bool,
+    /// 内核有权限（Mac 已授权 / Windows 以管理员身份运行）
+    pub privileged: bool,
+    /// mac / windows / linux
+    pub platform: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StateView {
     pub subscriptions: Vec<Subscription>,
     /// 有节点的分组（可选的走向）
@@ -355,6 +386,7 @@ pub struct StateView {
     /// 走向已失效（订阅里没有了）的条目
     pub fallbacks: Vec<String>,
     pub geo_ready: bool,
+    pub tun: TunView,
     pub data_dir: String,
 }
 
@@ -362,7 +394,7 @@ fn state_view(app: &AppState) -> StateView {
     let st = app.settings.lock().unwrap().clone();
     let parsed = app.parsed.lock().unwrap().clone();
     let sites = sites::catalog(&st);
-    let fallbacks = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true }).fallbacks;
+    let fallbacks = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false }).fallbacks;
     let sites = sites
         .into_iter()
         .map(|s| SiteView { choice: st.site_choices.get(&s.id).cloned().unwrap_or_default(), site: s })
@@ -390,6 +422,11 @@ fn state_view(app: &AppState) -> StateView {
         error: app.core.last_error.lock().unwrap().clone(),
         fallbacks,
         geo_ready: app.geo_ready(),
+        tun: TunView {
+            enabled: st.tun_enabled,
+            privileged: tun::privileged(app.core.binary()),
+            platform: tun::platform().into(),
+        },
         data_dir: app.dir.to_string_lossy().to_string(),
     }
 }
@@ -803,6 +840,47 @@ pub async fn reset_groups(app: S<'_>) -> Result<StateView, String> {
     app.regroup();
     app.apply(&[]).await?;
     Ok(state_view(&app))
+}
+
+// ───────────────────────── 增强模式（TUN） ─────────────────────────
+
+/// 打开或关闭增强模式。Mac 第一次打开会弹出系统密码框；
+/// Windows 没有管理员权限时返回 "NEED_ADMIN"，界面再提示以管理员身份重新启动
+#[tauri::command]
+pub async fn set_tun(app: S<'_>, enabled: bool) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    if enabled && !tun::privileged(app.core.binary()) {
+        match tun::platform() {
+            "mac" => {
+                let bin = app.core.binary().ok_or("找不到代理内核文件。")?.to_path_buf();
+                tauri::async_runtime::spawn_blocking(move || tun::grant(&bin))
+                    .await
+                    .map_err(|e| e.to_string())??;
+                // 授权后内核文件变成 root 所有，之前内核写下的文件要能继续用：内核目录保持不变即可
+            }
+            "windows" => {
+                app.settings.lock().unwrap().tun_enabled = true;
+                app.save_settings()?;
+                return Err("NEED_ADMIN".into());
+            }
+            _ => return Err("这个系统暂不支持增强模式。".into()),
+        }
+    }
+    app.settings.lock().unwrap().tun_enabled = enabled;
+    app.save_settings()?;
+    app.restart_core().await?;
+    Ok(state_view(&app))
+}
+
+/// Windows：以管理员身份重新启动软件（增强模式需要）
+#[tauri::command]
+pub async fn relaunch_as_admin(app: S<'_>, handle: tauri::AppHandle) -> Result<(), String> {
+    tun::relaunch_as_admin()?;
+    // 新的（管理员）实例已启动：本实例退出，退出时会恢复系统代理，新实例启动后自动重新连接
+    app.settings.lock().unwrap().tun_enabled = true;
+    app.save_settings()?;
+    handle.exit(0);
+    Ok(())
 }
 
 #[derive(Serialize, Default)]

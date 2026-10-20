@@ -89,6 +89,8 @@ pub struct Settings {
     pub secret: String,
     /// 上次退出时是否处于连接状态（下次打开自动连接）
     pub was_connected: bool,
+    /// 增强模式（TUN）：接管所有程序的流量
+    pub tun_enabled: bool,
 }
 
 impl Default for Settings {
@@ -105,6 +107,7 @@ impl Default for Settings {
             controller_port: 9098,
             secret: String::new(),
             was_connected: false,
+            tun_enabled: false,
         }
     }
 }

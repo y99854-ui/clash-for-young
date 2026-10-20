@@ -62,6 +62,10 @@ impl Core {
         core
     }
 
+    pub fn binary(&self) -> Option<&Path> {
+        self.binary.as_deref()
+    }
+
     pub fn workdir(&self) -> &Path {
         &self.workdir
     }
