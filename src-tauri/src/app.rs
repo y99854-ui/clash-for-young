@@ -194,6 +194,8 @@ impl AppState {
         }
         self.ensure_ports()?;
         self.ensure_geo().await;
+        // Mac 增强模式：用已授权的内核副本启动
+        self.core.set_launch_binary(if self.tun_active() { tun::launch_binary() } else { None });
         self.write_config()?;
         self.core.start(&self.api()).await
     }
@@ -853,7 +855,8 @@ pub async fn set_tun(app: S<'_>, enabled: bool) -> Result<StateView, String> {
         match tun::platform() {
             "mac" => {
                 let bin = app.core.binary().ok_or("找不到代理内核文件。")?.to_path_buf();
-                tauri::async_runtime::spawn_blocking(move || tun::grant(&bin))
+                let stage = app.dir.join("mihomo-stage");
+                tauri::async_runtime::spawn_blocking(move || tun::grant(&bin, &stage))
                     .await
                     .map_err(|e| e.to_string())??;
                 // 授权后内核文件变成 root 所有，之前内核写下的文件要能继续用：内核目录保持不变即可

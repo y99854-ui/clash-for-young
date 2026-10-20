@@ -21,6 +21,8 @@ pub struct Core {
     pub last_error: Mutex<Option<String>>,
     workdir: PathBuf,
     binary: Option<PathBuf>,
+    /// 这次启动改用的内核文件（Mac 增强模式下用已授权的那份）
+    launch_override: Mutex<Option<PathBuf>>,
 }
 
 pub fn exe_name() -> &'static str {
@@ -56,10 +58,16 @@ impl Core {
             last_error: Mutex::new(None),
             workdir,
             binary: find_binary(),
+            launch_override: Mutex::new(None),
         });
         let watcher = core.clone();
         std::thread::spawn(move || watcher.supervise());
         core
+    }
+
+    /// 下次启动内核时改用另一个文件；None 恢复用安装包里的
+    pub fn set_launch_binary(&self, p: Option<PathBuf>) {
+        *self.launch_override.lock().unwrap() = p;
     }
 
     pub fn binary(&self) -> Option<&Path> {
@@ -87,7 +95,8 @@ impl Core {
     }
 
     fn spawn(&self) -> Result<(), String> {
-        let bin = self.binary.clone().ok_or_else(|| {
+        let over = self.launch_override.lock().unwrap().clone();
+        let bin = over.or_else(|| self.binary.clone()).ok_or_else(|| {
             if cfg!(windows) {
                 "找不到代理内核文件 mihomo.exe。可能被杀毒软件删除了：请在杀毒软件里恢复它并加入白名单，或重新安装 Clash for Young。".to_string()
             } else {
