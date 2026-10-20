@@ -198,6 +198,13 @@ select { max-width: 100%; text-overflow: ellipsis; }
   .group-ops { justify-content: flex-end; }
 }
 
+/* 增强模式 */
+.row label.switch, .switch { display: flex; flex: 0 0 auto; min-width: 0; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; color: var(--text); }
+.switch input { width: 18px; height: 18px; margin: 0; }
+.conn-line { display: flex; align-items: center; gap: 10px; }
+.tun-tag { font-size: 11px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; }
+.tun-warn { color: var(--mid); }
+
 /* 折叠卡片 */
 .fold > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 10px; }
 .fold > summary::-webkit-details-marker { display: none; }

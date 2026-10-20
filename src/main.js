@@ -103,6 +103,7 @@ function renderHome() {
   const cat = on ? "assets/cat-awake.png" : "assets/cat-sleep.png";
   if (!$("catImg").src.endsWith(cat)) { $("catImg").src = cat; $("brandCat").src = cat; }
   $("connText").textContent = on ? "已连接" : "未连接";
+  $("tunTag").classList.toggle("hidden", !(on && S.tun.enabled && S.tun.privileged));
   let now = "";
   if (on && status) {
     if (status.node === "DIRECT") now = "全部直连";
@@ -203,6 +204,7 @@ function renderSettings() {
   if (document.activeElement !== $("ctlPort")) $("ctlPort").value = S.controllerPort;
   $("dataDir").textContent = "数据目录：" + S.dataDir;
   renderSubs();
+  renderTun();
   renderGroups();
   renderNodes();
 }
@@ -234,6 +236,28 @@ function renderGroups() {
   $("groupsSummary").textContent = `${gs.length} 个分组`;
   const other = (S.regions || []).find((r) => !r.id);
   $("otherInfo").textContent = other ? `还有 ${other.nodes.length} 个节点不在任何分组，归入「其他」。` : "所有节点都已分组。";
+}
+
+function renderTun() {
+  const t = S.tun;
+  const active = t.enabled && t.privileged;
+  $("tunToggle").checked = t.enabled;
+  $("tunSummary").textContent = active ? "已开启" : t.enabled ? "未生效" : "关闭";
+  let hint = "", fix = "";
+  if (t.platform === "mac") {
+    hint = "第一次开启会弹出系统密码框（输入开机密码），给代理内核授权。软件更新后需要再授权一次。";
+    if (t.enabled && !t.privileged) { hint = "⚠️ 增强模式还没生效：代理内核需要重新授权（更新软件后会这样）。"; fix = "授权"; }
+  } else if (t.platform === "windows") {
+    hint = "需要以管理员身份运行 Clash for Young。开启后软件会以管理员身份重新启动（会弹出确认窗口）。";
+    if (t.enabled && !t.privileged) { hint = "⚠️ 增强模式还没生效：需要以管理员身份运行。"; fix = "以管理员身份重新启动"; }
+  } else {
+    hint = "这个系统暂不支持增强模式。";
+    $("tunToggle").disabled = true;
+  }
+  $("tunHint").textContent = hint;
+  $("tunHint").classList.toggle("tun-warn", !!fix);
+  $("tunFixBtn").textContent = fix;
+  $("tunFixBtn").classList.toggle("hidden", !fix);
 }
 
 // ───────── 数据刷新 ─────────
@@ -535,6 +559,36 @@ $("cfgBtn").addEventListener("click", async () => {
   const box = $("logBox");
   box.textContent = (await call("current_config")) || "（还没有生成配置）";
   box.classList.remove("hidden");
+});
+
+// 增强模式
+async function setTun(enabled) {
+  $("tunToggle").disabled = true;
+  try {
+    if (enabled) toast(S.tun.platform === "mac" ? "请在弹出的窗口里输入开机密码…" : "正在开启增强模式…");
+    S = await call("set_tun", { enabled }, { quiet: true });
+    toast(enabled ? "增强模式已开启" : "增强模式已关闭");
+  } catch (err) {
+    if (String(err) === "NEED_ADMIN") {
+      await refreshState();
+      if (await askConfirm("增强模式需要以管理员身份运行。现在以管理员身份重新启动 Clash for Young 吗？（会弹出系统确认窗口）")) {
+        try { await call("relaunch_as_admin"); } catch (_) {}
+      }
+    } else {
+      toast(String(err), true);
+    }
+  } finally {
+    $("tunToggle").disabled = false;
+    render();
+  }
+}
+$("tunToggle").addEventListener("change", (e) => setTun(e.target.checked));
+$("tunFixBtn").addEventListener("click", async () => {
+  if (S.tun.platform === "windows") {
+    try { await call("relaunch_as_admin"); } catch (_) {}
+  } else {
+    setTun(true);
+  }
 });
 
 // 确认框（不用 window.confirm，部分系统的网页视图不支持）

@@ -40,7 +40,7 @@
         <img id="catImg" src="assets/cat-sleep.png" alt="" />
       </button>
       <div class="hero-text">
-        <div id="connText" class="conn-text">未连接</div>
+        <div class="conn-line"><span id="connText" class="conn-text">未连接</span><span id="tunTag" class="tun-tag hidden">增强模式</span></div>
         <div id="nowText" class="muted"></div>
       </div>
     </section>
@@ -115,6 +115,17 @@
         <span id="otherInfo" class="muted small"></span>
         <span class="spacer"></span>
         <button id="resetGroupsBtn" class="ghost small-btn">恢复默认分组</button>
+      </div>
+    </details>
+
+    <details class="card fold" id="tunBox">
+      <summary><span class="fold-title">增强模式（TUN）</span><span id="tunSummary" class="muted small"></span></summary>
+      <p class="muted small">普通模式通过系统代理工作，浏览器和大部分软件都够用。增强模式会接管电脑上<b>所有程序</b>的网络，包括终端命令、游戏、不认系统代理的软件。</p>
+      <p class="muted small" id="tunHint"></p>
+      <div class="row actions">
+        <label class="switch"><input type="checkbox" id="tunToggle" /><span>开启增强模式</span></label>
+        <span class="spacer"></span>
+        <button type="button" id="tunFixBtn" class="ghost hidden"></button>
       </div>
     </details>
 
