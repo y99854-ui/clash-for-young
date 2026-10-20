@@ -63,12 +63,24 @@ jobs:
       - if: matrix.platform == 'macos-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      # 发布说明：仓库根目录的 release-notes.md（每次发版前改写）
+      - name: 读取发布说明
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            cat release-notes.md 2>/dev/null || true
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ env.TAG }}
           releaseName: Clash for Young ${{ env.TAG }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           args: ${{ matrix.args }}
           assetNamePattern: clash-for-young_${{ env.TAG }}_[arch][setup][ext]
