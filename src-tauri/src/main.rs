@@ -21,6 +21,12 @@ const AUTO_UPDATE: Duration = Duration::from_secs(6 * 3600);
 
 fn main() {
     tauri::Builder::default()
+        // 只允许运行一个：再次打开时把已有的窗口叫出来。
+        // 同时开多个会共用同一个内核和配置，互相关掉对方的内核，导致断网。
+        // 必须是第一个注册的插件。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_window(app);
+        }))
         .setup(|a| {
             let dir = a.path().app_data_dir().expect("无法确定数据目录");
             let geo = a.path().resource_dir().ok().map(|r| r.join("geo"));

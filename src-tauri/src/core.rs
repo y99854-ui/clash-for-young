@@ -103,6 +103,9 @@ impl Core {
                 "找不到代理内核文件 mihomo，请重新安装 Clash for Young。".to_string()
             }
         })?;
+        // 上次软件被强制结束（崩溃、强制退出）时留下的内核还在运行：它占着端口和增强模式的路由，
+        // 新内核的增强模式会启动失败、电脑断网。先把它关掉。
+        self.kill_leftovers();
         let log = File::create(self.log_path()).map_err(|e| format!("无法创建内核日志：{e}"))?;
         let log2 = log.try_clone().map_err(|e| e.to_string())?;
         let mut cmd = Command::new(&bin);
@@ -122,8 +125,49 @@ impl Core {
                 format!("无法启动代理内核：{e}")
             }
         })?;
+        let _ = std::fs::write(self.pid_path(), child.id().to_string());
         *self.child.lock().unwrap() = Some(child);
         Ok(())
+    }
+
+    fn pid_path(&self) -> PathBuf {
+        self.workdir.join("mihomo.pid")
+    }
+
+    /// 关掉本软件以前启动、但没有正常退出的内核（不碰其他软件的进程）。
+    /// 依据：记录的进程号；Mac 上再按命令行里本软件的配置文件路径找一遍（兼容没有进程号记录的旧版本）。
+    pub fn kill_leftovers(&self) {
+        let own = self.child.lock().unwrap().as_ref().map(|c| c.id());
+        let mut pids: Vec<u32> = vec![];
+        if let Some(p) = std::fs::read_to_string(self.pid_path()).ok().and_then(|t| t.trim().parse().ok()) {
+            if is_our_core(p, &self.config_path()) {
+                pids.push(p);
+            }
+        }
+        #[cfg(unix)]
+        {
+            let cfg = self.config_path().to_string_lossy().to_string();
+            if let Ok(out) = Command::new("ps").args(["-axo", "pid=,command="]).output() {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    let line = line.trim();
+                    let Some((pid, cmd)) = line.split_once(' ') else { continue };
+                    if cmd.contains("mihomo") && cmd.contains(&cfg) {
+                        if let Ok(p) = pid.parse::<u32>() {
+                            if !pids.contains(&p) {
+                                pids.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        pids.retain(|p| Some(*p) != own);
+        for p in pids {
+            terminate(p);
+        }
+        if own.is_none() {
+            let _ = std::fs::remove_file(self.pid_path());
+        }
     }
 
     /// 启动内核并等它的控制接口就绪
@@ -153,9 +197,10 @@ impl Core {
     pub fn stop(&self) {
         self.want_running.store(false, Ordering::SeqCst);
         if let Some(mut c) = self.child.lock().unwrap().take() {
-            let _ = c.kill();
-            let _ = c.wait();
+            // 先礼貌地请它退出（让它自己清理增强模式的路由），不行再强制结束
+            graceful_stop(&mut c);
         }
+        let _ = std::fs::remove_file(self.pid_path());
     }
 
     /// 后台线程：内核意外退出时自动重启；一分钟内重启超过 5 次就放弃并报错
@@ -209,6 +254,78 @@ impl Core {
             Err(format!("配置有误，内核拒绝加载：{text}"))
         }
     }
+}
+
+/// 进程 pid 是不是本软件的内核（用这个配置文件启动的 mihomo）
+#[allow(unused_variables)]
+fn is_our_core(pid: u32, cfg: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        let Ok(out) = Command::new("ps").args(["-o", "command=", "-p", &pid.to_string()]).output() else { return false };
+        let cmd = String::from_utf8_lossy(&out.stdout);
+        return cmd.contains("mihomo") && cmd.contains(&*cfg.to_string_lossy());
+    }
+    #[cfg(windows)]
+    {
+        let mut c = Command::new("tasklist");
+        c.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).creation_flags(0x0800_0000);
+        let Ok(out) = c.output() else { return false };
+        return String::from_utf8_lossy(&out.stdout).to_ascii_lowercase().contains("mihomo");
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+/// 结束进程：先 SIGTERM 等它清理，2 秒后还在就强制结束
+fn terminate(pid: u32) {
+    #[cfg(unix)]
+    {
+        let quiet = |sig: &str| {
+            Command::new("kill")
+                .args([sig, &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        let alive = || quiet("-0");
+        quiet("-TERM");
+        for _ in 0..20 {
+            if !alive() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        quiet("-KILL");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    #[cfg(windows)]
+    {
+        let mut c = Command::new("taskkill");
+        c.args(["/F", "/PID", &pid.to_string()]).creation_flags(0x0800_0000);
+        let _ = c.status();
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+fn graceful_stop(c: &mut Child) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-TERM", &c.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        for _ in 0..20 {
+            if matches!(c.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let _ = c.kill();
+    let _ = c.wait();
 }
 
 /// 把内核日志里常见的错误翻译成人话
@@ -302,4 +419,38 @@ pub fn port_free(port: u16) -> bool {
 /// 从 start 开始找一个空闲端口，跳过 avoid
 pub fn pick_port(start: u16, avoid: u16) -> u16 {
     (start..start.saturating_add(200)).find(|p| *p != avoid && port_free(*p)).unwrap_or(start)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 模拟软件被强制结束后留下的内核：新 Core 应该能找到并关掉它。需要 CFY_MIHOMO。
+    #[test]
+    #[ignore]
+    fn kills_leftover_core() {
+        let bin = std::env::var("CFY_MIHOMO").expect("CFY_MIHOMO");
+        let dir = std::env::temp_dir().join(format!("cfy-leftover-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("config.yaml");
+        std::fs::write(&cfg, "mixed-port: 17977\nlog-level: warning\nrules:\n  - MATCH,DIRECT\n").unwrap();
+        let mut orphan = Command::new(&bin).arg("-d").arg(&dir).arg("-f").arg(&cfg).spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(800));
+        assert!(matches!(orphan.try_wait(), Ok(None)), "orphan should be running");
+        // 另一个无关的 mihomo（其他软件的）不能被误杀
+        let other_dir = dir.join("other");
+        std::fs::create_dir_all(&other_dir).unwrap();
+        let other_cfg = other_dir.join("config.yaml");
+        std::fs::write(&other_cfg, "mixed-port: 17978\nlog-level: warning\nrules:\n  - MATCH,DIRECT\n").unwrap();
+        let mut other = Command::new(&bin).arg("-d").arg(&other_dir).arg("-f").arg(&other_cfg).spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+
+        let core = Core::new(dir.clone());
+        core.kill_leftovers();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(matches!(orphan.try_wait(), Ok(Some(_))), "leftover core should be stopped");
+        assert!(matches!(other.try_wait(), Ok(None)), "other app's core must keep running");
+        let _ = other.kill();
+        let _ = other.wait();
+    }
 }

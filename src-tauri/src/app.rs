@@ -998,6 +998,8 @@ pub async fn set_ports(app: S<'_>, mixed_port: u16, controller_port: u16) -> Res
 /// 启动时：恢复上次崩溃留下的系统代理。不自动连接，由用户自己点小猫连接。
 pub async fn on_startup(app: &AppState) {
     let port = app.settings.lock().unwrap().mixed_port;
+    // 上次被强制结束时留下的内核（会让增强模式断网）
+    app.core.kill_leftovers();
     sysproxy_ctl::recover_on_startup(&app.dir, port);
 }
 

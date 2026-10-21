@@ -248,7 +248,8 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ("geosite", s("https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat")),
         ("mmdb", s("https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country-lite.mmdb")),
     ]);
-    let profile = map(vec![("store-selected", Value::from(false))]);
+    // store-fake-ip：内核重启后假 IP 和域名的对应关系不变，浏览器缓存的假 IP 还能用
+    let profile = map(vec![("store-selected", Value::from(false)), ("store-fake-ip", Value::from(true))]);
     let tun = map(vec![
         ("enable", Value::from(input.tun)),
         ("stack", s("mixed")),
@@ -258,14 +259,27 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ("dns-hijack", seq(vec!["any:53".into()])),
     ]);
 
-    let proxies: Vec<Value> = parsed.proxies.iter().cloned().map(Value::Mapping).collect();
+    // 所有节点都允许转发 UDP：很多订阅默认写 udp: false，但服务器其实支持。
+    // 增强模式下 WebRTC、游戏、语音通话走 UDP，开了才能经节点出去（WebRTC 显示的是节点 IP）；
+    // 服务器真不支持也只是这些 UDP 连接失败，和关着一样，不会泄漏真实 IP。
+    let proxies: Vec<Value> = parsed
+        .proxies
+        .iter()
+        .cloned()
+        .map(|mut p| {
+            p.insert(s("udp"), Value::from(true));
+            Value::Mapping(p)
+        })
+        .collect();
     let root = map(vec![
         ("mixed-port", Value::from(st.mixed_port)),
         ("allow-lan", Value::from(false)),
         ("bind-address", s("127.0.0.1")),
         ("mode", s("rule")),
         ("log-level", s("warning")),
-        ("ipv6", Value::from(false)),
+        // 增强模式下打开：否则 IPv6 流量不进虚拟网卡、直接走本地网络，
+        // 网页（包括 WebRTC）能看到你的真实 IPv6 地址。DNS 仍不返回 IPv6 地址，正常上网走 IPv4。
+        ("ipv6", Value::from(input.tun)),
         ("unified-delay", Value::from(true)),
         ("tcp-concurrent", Value::from(true)),
         // 不按程序分流，关掉进程查找：每个新连接都查进程会明显拖慢速度
@@ -358,6 +372,9 @@ proxies:
         assert!(!out.yaml.contains("GEOSITE"));
         assert_eq!(v["tun"]["enable"].as_bool(), Some(true));
         assert_eq!(v["dns"]["enhanced-mode"].as_str(), Some("fake-ip"));
+        // 增强模式接管 IPv6，防止 IPv6 / WebRTC 泄漏；DNS 不返回 IPv6 地址
+        assert_eq!(v["ipv6"].as_bool(), Some(true));
+        assert_eq!(v["dns"]["ipv6"].as_bool(), Some(false));
         if let Ok(p) = std::env::var("CFY_DUMP_TUN") {
             std::fs::write(p, &out.yaml).unwrap();
         }
@@ -376,6 +393,7 @@ proxies:
         assert!(out.yaml.contains("GEOIP,CN,DIRECT,no-resolve"));
         assert!(!out.yaml.contains("doh.pub"));
         assert_eq!(v["find-process-mode"].as_str(), Some("off"));
+        assert!(v["proxies"].as_sequence().unwrap().iter().all(|p| p["udp"].as_bool() == Some(true)));
     }
 
     #[test]
