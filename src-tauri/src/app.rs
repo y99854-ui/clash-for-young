@@ -209,7 +209,7 @@ impl AppState {
         self.save_settings()
     }
 
-    /// 断开：恢复系统代理、停止内核。remember=false 用于退出软件（下次打开仍自动连接）
+    /// 断开：恢复系统代理、停止内核。remember=false 用于退出软件
     pub fn disconnect(&self, remember: bool) -> Result<(), String> {
         let port = self.settings.lock().unwrap().mixed_port;
         let was = self.connected.swap(false, Ordering::SeqCst);
@@ -995,19 +995,10 @@ pub async fn set_ports(app: S<'_>, mixed_port: u16, controller_port: u16) -> Res
     Ok(state_view(&app))
 }
 
-/// 启动时：恢复上次崩溃留下的系统代理；上次是连接状态就自动连接
+/// 启动时：恢复上次崩溃留下的系统代理。不自动连接，由用户自己点小猫连接。
 pub async fn on_startup(app: &AppState) {
-    let (port, was) = {
-        let s = app.settings.lock().unwrap();
-        (s.mixed_port, s.was_connected)
-    };
+    let port = app.settings.lock().unwrap().mixed_port;
     sysproxy_ctl::recover_on_startup(&app.dir, port);
-    if was && !app.parsed.lock().unwrap().proxies.is_empty() {
-        let _g = app.op.lock().await;
-        if let Err(e) = app.connect().await {
-            *app.core.last_error.lock().unwrap() = Some(e);
-        }
-    }
 }
 
 #[cfg(test)]

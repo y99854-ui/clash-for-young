@@ -87,7 +87,7 @@ pub struct Settings {
     pub mixed_port: u16,
     pub controller_port: u16,
     pub secret: String,
-    /// 上次退出时是否处于连接状态（下次打开自动连接）
+    /// 上次退出时是否处于连接状态（只做记录，打开软件不会自动连接）
     pub was_connected: bool,
     /// 增强模式（TUN）：接管所有程序的流量
     pub tun_enabled: bool,

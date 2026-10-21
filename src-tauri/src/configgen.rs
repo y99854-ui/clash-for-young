@@ -197,20 +197,51 @@ pub fn generate(input: &GenInput) -> GenOutput {
     rules.push("IP-CIDR6,fe80::/10,DIRECT,no-resolve".into());
     if input.geo_ready {
         rules.push("GEOSITE,cn,DIRECT".into());
-        rules.push("GEOIP,CN,DIRECT".into());
+        // no-resolve：只对直接用 IP 的连接判断，不为了判断规则去本地解析外网域名
+        // （本地解析会把访问的网站暴露给本地 DNS，也会拖慢每个新连接）
+        rules.push("GEOIP,CN,DIRECT,no-resolve".into());
     }
+    // 走代理的 QUIC（UDP 443）拦掉，浏览器会自动改用 TCP：很多节点转发 UDP 很慢
+    rules.push("AND,((NETWORK,UDP),(DST-PORT,443)),REJECT".into());
     rules.push(format!("MATCH,{GROUP_DEFAULT}"));
 
     // ── 整体 ──
+    // DNS：
+    // - 国内网站用国内 DNS（直连），其他网站用国外 DNS 并且经过代理（respect-rules），
+    //   不会把访问的国外网站泄漏给本地网络，也能拿到离节点近的 IP
+    // - 增强模式用 fake-ip：程序拿到的是假 IP，真实解析交给节点完成
+    let cn_dns = vec!["https://223.5.5.5/dns-query".to_string(), "https://1.12.12.12/dns-query".to_string()];
+    let mut policy = Mapping::new();
+    policy.insert(s("+.lan"), Value::from("system"));
+    policy.insert(s("+.local"), Value::from("system"));
+    if input.geo_ready {
+        policy.insert(s("geosite:cn,private"), seq(cn_dns.clone()));
+    }
     let dns = map(vec![
         ("enable", Value::from(true)),
         ("ipv6", Value::from(false)),
-        ("enhanced-mode", s("redir-host")),
-        ("default-nameserver", seq(vec!["223.5.5.5".into(), "119.29.29.29".into()])),
+        ("enhanced-mode", s(if input.tun { "fake-ip" } else { "redir-host" })),
+        ("fake-ip-range", s("198.18.0.1/16")),
         (
-            "nameserver",
-            seq(vec!["https://doh.pub/dns-query".into(), "https://dns.alidns.com/dns-query".into()]),
+            "fake-ip-filter",
+            seq(vec![
+                "+.lan".into(),
+                "+.local".into(),
+                "+.msftconnecttest.com".into(),
+                "+.msftncsi.com".into(),
+                "time.*.com".into(),
+                "+.ntp.org".into(),
+                "+.stun.*.*".into(),
+                "+.stun.*.*.*".into(),
+                "localhost.ptlogin2.qq.com".into(),
+            ]),
         ),
+        ("respect-rules", Value::from(true)),
+        ("default-nameserver", seq(vec!["223.5.5.5".into(), "119.29.29.29".into()])),
+        ("nameserver", seq(vec!["https://1.1.1.1/dns-query".into(), "https://8.8.8.8/dns-query".into()])),
+        ("nameserver-policy", Value::Mapping(policy)),
+        // 解析节点服务器地址用（直连）
+        ("proxy-server-nameserver", seq(cn_dns)),
     ]);
     let geox = map(vec![
         ("geoip", s("https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat")),
@@ -237,6 +268,8 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ("ipv6", Value::from(false)),
         ("unified-delay", Value::from(true)),
         ("tcp-concurrent", Value::from(true)),
+        // 不按程序分流，关掉进程查找：每个新连接都查进程会明显拖慢速度
+        ("find-process-mode", s("off")),
         ("external-controller", Value::from(format!("127.0.0.1:{}", st.controller_port))),
         ("secret", Value::from(st.secret.clone())),
         ("geo-auto-update", Value::from(false)),
@@ -324,6 +357,25 @@ proxies:
         assert_eq!(v["proxy-groups"][0]["proxies"][0].as_str().unwrap(), "日本");
         assert!(!out.yaml.contains("GEOSITE"));
         assert_eq!(v["tun"]["enable"].as_bool(), Some(true));
+        assert_eq!(v["dns"]["enhanced-mode"].as_str(), Some("fake-ip"));
+        if let Ok(p) = std::env::var("CFY_DUMP_TUN") {
+            std::fs::write(p, &out.yaml).unwrap();
+        }
+    }
+
+    #[test]
+    fn dns_no_leak() {
+        let parsed = sample();
+        let st = Settings::default();
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &[], geo_ready: true, tun: false });
+        let v: Value = serde_yaml::from_str(&out.yaml).unwrap();
+        // 国外网站的 DNS 走代理，国内网站用国内 DNS
+        assert_eq!(v["dns"]["respect-rules"].as_bool(), Some(true));
+        assert!(v["dns"]["nameserver"][0].as_str().unwrap().contains("1.1.1.1"));
+        assert!(v["dns"]["nameserver-policy"]["geosite:cn,private"].is_sequence());
+        assert!(out.yaml.contains("GEOIP,CN,DIRECT,no-resolve"));
+        assert!(!out.yaml.contains("doh.pub"));
+        assert_eq!(v["find-process-mode"].as_str(), Some("off"));
     }
 
     #[test]
