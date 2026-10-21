@@ -121,6 +121,7 @@
     <details class="card fold" id="tunBox">
       <summary><span class="fold-title">增强模式（TUN）</span><span id="tunSummary" class="muted small"></span></summary>
       <p class="muted small">普通模式通过系统代理工作，浏览器和大部分软件都够用。增强模式会接管电脑上<b>所有程序</b>的网络，包括终端命令、游戏、不认系统代理的软件。</p>
+      <p class="muted small">在意隐私的话建议开启：普通模式下浏览器的 WebRTC（网页视频通话用的技术）会绕过代理，网站能看到你的真实 IP；增强模式会把它和 IPv6 流量一起接管。</p>
       <p class="muted small" id="tunHint"></p>
       <div class="row actions">
         <label class="switch"><input type="checkbox" id="tunToggle" /><span>开启增强模式</span></label>
