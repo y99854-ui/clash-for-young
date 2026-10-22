@@ -32,6 +32,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # 编译进软件，显示在设置页底部
+      CFY_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
