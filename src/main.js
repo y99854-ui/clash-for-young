@@ -92,6 +92,7 @@ function render() {
   if (!S) return;
   if (!S.subscriptions.length) { show("welcome"); return; }
   if (view === "welcome") show("home");
+  $("appVersion").textContent = S.version || "";
   renderHome();
   renderSites();
   renderSettings();
@@ -583,6 +584,15 @@ async function setTun(enabled) {
   }
 }
 $("tunToggle").addEventListener("change", (e) => setTun(e.target.checked));
+
+// 导出手机配置
+$("exportMobileBtn").addEventListener("click", async () => {
+  try {
+    const path = await call("export_mobile_config");
+    $("exportMobileInfo").textContent = "已保存到「下载」文件夹：" + path.split(/[\\/]/).pop();
+    toast("已导出，文件在「下载」文件夹");
+  } catch (_) {}
+});
 $("tunFixBtn").addEventListener("click", async () => {
   if (S.tun.platform === "windows") {
     try { await call("relaunch_as_admin"); } catch (_) {}

@@ -130,6 +130,17 @@
       </div>
     </details>
 
+    <details class="card fold" id="mobileBox">
+      <summary><span class="fold-title">手机</span><span class="muted small">导出配置给手机用</span></summary>
+      <p class="muted small">把这里的分组、网站选择和自定义规则做成一份配置文件，导入手机软件后，手机的分流和电脑一样。订阅里的节点会在手机上自动更新；改了分组或规则后需要重新导出。</p>
+      <p class="muted small"><b>iPhone</b>：App Store 下载 <b>Clash Mi</b>（免费）。<b>安卓</b>：Clash Meta for Android 或 FlClash。<br />导出后用 AirDrop、微信等把文件发到手机，在这些软件里导入。</p>
+      <p class="muted small">⚠️ 文件里有你的订阅链接，只发给自己的手机，不要分享给别人。</p>
+      <div class="row actions">
+        <button type="button" id="exportMobileBtn">导出手机配置</button>
+        <span id="exportMobileInfo" class="muted small"></span>
+      </div>
+    </details>
+
     <input type="file" id="subFileInput" accept=".yaml,.yml,.txt,.conf,text/yaml,text/plain" multiple class="hidden" />
 
     <details class="card adv fold" id="checkBox">
@@ -165,7 +176,7 @@
       <p id="dataDir" class="muted small"></p>
     </details>
 
-    <p class="muted small about">Clash for Young · 基于 mihomo 内核 · GPL-3.0</p>
+    <p class="muted small about">Clash for Young <span id="appVersion"></span> · 基于 mihomo 内核 · GPL-3.0</p>
   </main>
 
   <!-- 编辑网站的对话框 -->
