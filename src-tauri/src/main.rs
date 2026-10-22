@@ -5,6 +5,7 @@ mod app;
 mod check;
 mod configgen;
 mod core;
+mod mobile;
 mod settings;
 mod sites;
 mod subscription;
@@ -91,6 +92,7 @@ fn main() {
             app::reset_groups,
             app::set_tun,
             app::relaunch_as_admin,
+            app::export_mobile_config,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")

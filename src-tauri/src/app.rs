@@ -390,6 +390,13 @@ pub struct StateView {
     pub geo_ready: bool,
     pub tun: TunView,
     pub data_dir: String,
+    /// 版本号（发版时由打包流程写入，如 v6712；本地开发是“开发版”）
+    pub version: String,
+}
+
+/// 版本号：GitHub Actions 打包时把发布标签放进环境变量 CFY_VERSION
+pub fn app_version() -> String {
+    option_env!("CFY_VERSION").filter(|v| !v.trim().is_empty()).unwrap_or("开发版").to_string()
 }
 
 fn state_view(app: &AppState) -> StateView {
@@ -430,6 +437,7 @@ fn state_view(app: &AppState) -> StateView {
             platform: tun::platform().into(),
         },
         data_dir: app.dir.to_string_lossy().to_string(),
+        version: app_version(),
     }
 }
 
@@ -969,6 +977,38 @@ pub fn core_log(app: S) -> String {
 #[tauri::command]
 pub fn current_config(app: S) -> String {
     std::fs::read_to_string(app.core.config_path()).unwrap_or_default()
+}
+
+/// 导出手机配置：写到「下载」文件夹并在访达 / 资源管理器里选中它，返回文件路径
+#[tauri::command]
+pub fn export_mobile_config(app: S, handle: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let st = app.settings.lock().unwrap().clone();
+    let parsed = app.parsed.lock().unwrap().clone();
+    let texts: Vec<String> =
+        st.subscriptions.iter().map(|x| std::fs::read_to_string(sub_file(&app.dir, &x.id)).unwrap_or_default()).collect();
+    let sites = sites::catalog(&st);
+    let yaml = crate::mobile::generate(&crate::mobile::MobileInput { settings: &st, parsed: &parsed, sites: &sites, texts: &texts })?;
+    let dir = handle.path().download_dir().unwrap_or_else(|_| app.dir.clone());
+    let path = dir.join("Clash for Young 手机配置.yaml");
+    std::fs::write(&path, yaml).map_err(|e| format!("无法保存文件：{e}"))?;
+    reveal(&path);
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 在访达 / 资源管理器里显示并选中文件
+fn reveal(path: &Path) {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = path;
 }
 
 /// 改端口（高级）

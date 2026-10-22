@@ -178,11 +178,35 @@ fn usable_items(text: &str) -> Result<Vec<Mapping>, String> {
 
 /// 合并多份订阅的节点。无法解析的那份直接跳过。defs：分组定义；节点不能和分组重名
 pub fn parse_many(texts: &[String], defs: &[NodeGroup]) -> Parsed {
+    let proxies = tagged_proxies(texts, defs).into_iter().map(|t| t.proxy).collect();
+    let mut parsed = Parsed { proxies, ..Default::default() };
+    parsed.apply_groups(defs);
+    parsed
+}
+
+/// 一个节点和它的来源
+pub struct Tagged {
+    /// 来自 texts 里的第几份
+    pub source: usize,
+    /// 订阅里的原名
+    pub original: String,
+    /// 去重后的配置（name 是最终名字）
+    pub proxy: Mapping,
+}
+
+impl Tagged {
+    pub fn name(&self) -> String {
+        self.proxy.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string()
+    }
+}
+
+/// 合并多份订阅的节点，并记下每个节点来自哪一份、原名是什么（导出手机配置要用）
+pub fn tagged_proxies(texts: &[String], defs: &[NodeGroup]) -> Vec<Tagged> {
     let mut reserved = reserved_names();
     reserved.extend(defs.iter().map(|g| g.name.clone()));
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut proxies = vec![];
-    for text in texts {
+    let mut out = vec![];
+    for (source, text) in texts.iter().enumerate() {
         let Ok(items) = usable_items(text) else { continue };
         for map in items {
             let name = map.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
@@ -196,12 +220,40 @@ pub fn parse_many(texts: &[String], defs: &[NodeGroup]) -> Parsed {
             used.insert(final_name.clone());
             let mut m = map.clone();
             m.insert(Value::from("name"), Value::from(final_name));
-            proxies.push(m);
+            out.push(Tagged { source, original: name, proxy: m });
         }
     }
-    let mut parsed = Parsed { proxies, ..Default::default() };
-    parsed.apply_groups(defs);
-    parsed
+    out
+}
+
+/// 信息节点的正则（给手机配置的 exclude-filter 用）
+pub fn info_pattern() -> &'static str {
+    INFO_PATTERN
+}
+
+/// 把分组规则（关键词 + 手动节点）写成正则，和 group_matches 的判断一致
+pub fn group_regex(g: &NodeGroup) -> Option<String> {
+    let mut parts: Vec<String> = vec![];
+    for k in &g.keywords {
+        let k = k.trim();
+        if k.is_empty() {
+            continue;
+        }
+        let e = regex::escape(k);
+        if k.len() <= 3 && k.chars().all(|c| c.is_ascii_alphabetic()) {
+            parts.push(format!("(?<![A-Za-z]){e}(?![A-Za-z])"));
+        } else {
+            parts.push(e);
+        }
+    }
+    for n in &g.nodes {
+        parts.push(format!("^{}$", regex::escape(n)));
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(format!("(?i)({})", parts.join("|")))
+    }
 }
 
 /// 解析单份订阅（没有可用节点时报错）
