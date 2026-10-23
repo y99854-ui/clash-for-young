@@ -10,6 +10,33 @@ let view = "home";
 let rulesDraft = [];   // 正在编辑的自定义规则
 let delays = {};       // 节点延迟
 
+// ───────── 中英文 ─────────
+let LANG = "zh";       // 实际使用的语言，来自后端 S.lang
+const isEn = () => LANG === "en";
+function L(zh, en) { return isEn() ? en : zh; }
+// 软件内部的名字（配置里的组名、内置网站分类和中文网站名）：英文界面显示英文
+const NAME_EN = {
+  "默认地区": "Default region", "自动选择": "Auto (fastest)", "其他": "Other", "直连": "Direct",
+  "美国": "United States", "台湾": "Taiwan",
+  "视频": "Video", "社交": "Social", "常用": "Everyday", "科研": "Research", "国内": "China", "我添加的": "Added by me",
+  "中国知网": "CNKI", "哔哩哔哩": "Bilibili", "百度": "Baidu", "淘宝": "Taobao", "知乎": "Zhihu", "微信": "WeChat", "小红书": "Xiaohongshu (RED)",
+};
+const dn = (name) => (isEn() && NAME_EN[name]) || name;
+// 把页面上带 data-en 的固定文字切换到当前语言
+function applyLang() {
+  document.documentElement.lang = isEn() ? "en" : "zh-CN";
+  for (const [attr, key, zhKey] of [["innerHTML", "en", "zh"], ["placeholder", "enPlaceholder", "zhPlaceholder"], ["title", "enTitle", "zhTitle"]]) {
+    const sel = key === "en" ? "[data-en]" : key === "enPlaceholder" ? "[data-en-placeholder]" : "[data-en-title]";
+    document.querySelectorAll(sel).forEach((el) => {
+      if (el.dataset[zhKey] == null) el.dataset[zhKey] = el[attr];
+      el[attr] = isEn() ? el.dataset[key] : el.dataset[zhKey];
+    });
+  }
+  $("welcomeLang").innerHTML = isEn()
+    ? `<button type="button" class="linklike" data-lang="zh">切换到中文</button>`
+    : `<button type="button" class="linklike" data-lang="en">Switch to English</button>`;
+}
+
 // ───────── 小工具 ─────────
 let toastTimer;
 function toast(msg, bad = false) {
@@ -42,10 +69,10 @@ function fmtDate(ms) {
 }
 function fmtAgo(ms) {
   const m = Math.round((Date.now() - ms) / 60000);
-  if (m < 1) return "刚刚";
-  if (m < 60) return `${m} 分钟前`;
-  if (m < 60 * 24) return `${Math.round(m / 60)} 小时前`;
-  return `${Math.round(m / 1440)} 天前`;
+  if (m < 1) return L("刚刚", "just now");
+  if (m < 60) return L(`${m} 分钟前`, `${m} min ago`);
+  if (m < 60 * 24) return L(`${Math.round(m / 60)} 小时前`, `${Math.round(m / 60)} h ago`);
+  return L(`${Math.round(m / 1440)} 天前`, `${Math.round(m / 1440)} days ago`);
 }
 function delayClass(d) { return d == null ? "" : d < 300 ? "delay-good" : d < 800 ? "delay-mid" : "delay-slow"; }
 
@@ -54,26 +81,26 @@ function delayClass(d) { return d == null ? "" : d < 300 ? "delay-good" : d < 80
 function targetOptions(selected, mode) {
   const opts = [];
   const add = (v, label) => opts.push(`<option value="${esc(v)}"${v === selected ? " selected" : ""}>${esc(label)}</option>`);
-  if (mode === "site") add("", "自动");
-  if (mode === "rule") add("default", "默认地区");
-  if (mode === "default") add("fastest", "自动（最快的节点）");
-  else add("fastest", "最快的节点");
-  add("DIRECT", mode === "default" ? "全部直连（不走代理）" : "直连");
-  if (mode === "rule") add("REJECT", "拦截");
+  if (mode === "site") add("", L("自动", "Auto"));
+  if (mode === "rule") add("default", L("默认地区", "Default region"));
+  if (mode === "default") add("fastest", L("自动（最快的节点）", "Auto (fastest node)"));
+  else add("fastest", L("最快的节点", "Fastest node"));
+  add("DIRECT", mode === "default" ? L("全部直连（不走代理）", "All direct (no proxy)") : L("直连", "Direct"));
+  if (mode === "rule") add("REJECT", L("拦截", "Block"));
   const regions = S?.regions || [];
   if (regions.length) {
-    opts.push(`<optgroup label="分组（组内自动选最快）">`);
-    for (const r of regions) add("region:" + r.name, `${r.name}（${r.nodes.length}）`);
+    opts.push(`<optgroup label="${L("分组（组内自动选最快）", "Groups (fastest node in the group)")}">`);
+    for (const r of regions) add("region:" + r.name, `${dn(r.name)} (${r.nodes.length})`);
     opts.push(`</optgroup>`);
   }
   for (const r of regions) {
-    opts.push(`<optgroup label="具体节点 · ${esc(r.name)}">`);
+    opts.push(`<optgroup label="${L("具体节点", "Nodes")} · ${esc(dn(r.name))}">`);
     for (const n of r.nodes) add("node:" + n, n);
     opts.push(`</optgroup>`);
   }
   // 已失效的选择也要显示出来，避免下拉框悄悄跳到别的选项
   if (selected && !opts.some((o) => o.includes(" selected"))) {
-    opts.push(`<option value="${esc(selected)}" selected>（已失效）${esc(selected.replace(/^(region|node):/, ""))}</option>`);
+    opts.push(`<option value="${esc(selected)}" selected>${L("（已失效）", "(unavailable) ")}${esc(selected.replace(/^(region|node):/, ""))}</option>`);
   }
   return opts.join("");
 }
@@ -88,11 +115,14 @@ function show(v) {
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => { show(t.dataset.view); render(); }));
 
 // ───────── 渲染 ─────────
+function versionText(v) { return v === "dev" ? L("开发版", "dev build") : v || ""; }
 function render() {
   if (!S) return;
+  if ((S.lang || "zh") !== LANG || !$("welcomeLang").innerHTML) { LANG = S.lang || "zh"; applyLang(); }
+  renderLang();
   if (!S.subscriptions.length) { show("welcome"); return; }
   if (view === "welcome") show("home");
-  $("appVersion").textContent = S.version || "";
+  $("appVersion").textContent = versionText(S.version);
   renderUpdate();
   renderHome();
   renderSites();
@@ -104,24 +134,24 @@ function renderHome() {
   $("powerBtn").classList.toggle("on", on);
   const cat = on ? "assets/cat-awake.png" : "assets/cat-sleep.png";
   if (!$("catImg").src.endsWith(cat)) { $("catImg").src = cat; $("brandCat").src = cat; }
-  $("connText").textContent = on ? "已连接" : "未连接";
+  $("connText").textContent = on ? L("已连接", "Connected") : L("未连接", "Not connected");
   $("tunTag").classList.toggle("hidden", !(on && S.tun.enabled && S.tun.privileged));
   $("globalTag").classList.toggle("hidden", !(on && S.globalMode));
   document.querySelectorAll("#modeSeg button").forEach((b) => b.classList.toggle("active", (b.dataset.global === "1") === S.globalMode));
   $("modeHint").textContent = S.globalMode
-    ? "全局：所有网站（包括国内网站）都走下面的默认地区。"
-    : "规则：国内网站直连，其他网站按「网站」页的设置走。";
+    ? L("全局：所有网站（包括国内网站）都走下面的默认地区。", "Global: every site, including China sites, uses the default region below.")
+    : L("规则：国内网站直连，其他网站按「网站」页的设置走。", "Rule: China sites go direct; other sites follow the Sites page.");
   $("defaultHint").textContent = S.globalMode
-    ? "全局模式下所有网站都走这里（局域网除外）。分组可以在「设置 → 节点分组」里修改。"
-    : "没有单独设置的网站都走这里。国内网站始终直连。分组可以在「设置 → 节点分组」里修改。";
+    ? L("全局模式下所有网站都走这里（局域网除外）。分组可以在「设置 → 节点分组」里修改。", "In Global mode every site uses this (except your local network). Edit groups in Settings → Node groups.")
+    : L("没有单独设置的网站都走这里。国内网站始终直连。分组可以在「设置 → 节点分组」里修改。", "Sites without their own setting use this. China sites always go direct. Edit groups in Settings → Node groups.");
   let now = "";
   if (on && status) {
-    if (status.node === "DIRECT") now = "全部直连";
+    if (status.node === "DIRECT") now = L("全部直连", "All direct");
     else if (status.node) {
       const d = status.delay != null ? ` · <span class="${delayClass(status.delay)}">${status.delay} ms</span>` : "";
-      now = `${esc(status.region)} · ${esc(status.node)}${d}`;
+      now = `${esc(dn(status.region))} · ${esc(status.node)}${d}`;
     }
-  } else if (!on) now = "小猫在睡觉，点它开始上网";
+  } else if (!on) now = L("小猫在睡觉，点它开始上网", "The cat is asleep. Click it to get online.");
   $("nowText").innerHTML = now;
 
   const err = status?.error || S.error;
@@ -131,36 +161,41 @@ function renderHome() {
   $("defaultSelect").innerHTML = targetOptions(S.defaultTarget, "default");
 
   const subs = S.subscriptions;
-  $("subInfo").textContent = `${subs.length} 个订阅 · 共 ${S.nodeCount} 个节点`;
+  $("subInfo").textContent = subsCount(subs.length, S.nodeCount);
   $("homeSubs").innerHTML = subs.map((sub) => {
     const u = sub.usage;
     const right = [];
-    if (u && u.total) right.push(`已用 ${fmtBytes(u.upload + u.download)} / ${fmtBytes(u.total)}`);
-    if (u && u.expire) right.push(`${fmtDate(u.expire * 1000)} 到期`);
+    if (u && u.total) right.push(usedText(u));
+    if (u && u.expire) right.push(expireText(u));
     const bar = u && u.total
       ? `<div class="usage"><div style="width:${Math.min(100, ((u.upload + u.download) / u.total) * 100)}%"></div></div>` : "";
-    return `<div class="home-sub"><div class="line"><span><b>${esc(sub.name)}</b> · ${sub.nodeCount} 个节点</span><span>${esc(right.join(" · "))}</span></div>${bar}</div>`;
+    return `<div class="home-sub"><div class="line"><span><b>${esc(sub.name)}</b> · ${nodesText(sub.nodeCount)}</span><span>${esc(right.join(" · "))}</span></div>${bar}</div>`;
   }).join("");
 }
 
+const nodesText = (n) => L(`${n} 个节点`, n === 1 ? "1 node" : `${n} nodes`);
+const subsCount = (subs, nodes) => L(`${subs} 个订阅 · 共 ${nodes} 个节点`, `${subs} subscription${subs === 1 ? "" : "s"} · ${nodes} nodes`);
+const usedText = (u) => L(`已用 ${fmtBytes(u.upload + u.download)} / ${fmtBytes(u.total)}`, `Used ${fmtBytes(u.upload + u.download)} / ${fmtBytes(u.total)}`);
+const expireText = (u) => L(`${fmtDate(u.expire * 1000)} 到期`, `expires ${fmtDate(u.expire * 1000)}`);
 function subMeta(sub) {
-  const parts = [`${sub.nodeCount} 个节点`, sub.url ? `更新于 ${fmtAgo(sub.updatedAt)}` : `导入于 ${fmtAgo(sub.updatedAt)}`];
+  const ago = fmtAgo(sub.updatedAt);
+  const parts = [nodesText(sub.nodeCount), sub.url ? L(`更新于 ${ago}`, `updated ${ago}`) : L(`导入于 ${ago}`, `imported ${ago}`)];
   const u = sub.usage;
-  if (u && u.total) parts.push(`已用 ${fmtBytes(u.upload + u.download)} / ${fmtBytes(u.total)}`);
-  if (u && u.expire) parts.push(`${fmtDate(u.expire * 1000)} 到期`);
+  if (u && u.total) parts.push(usedText(u));
+  if (u && u.expire) parts.push(expireText(u));
   return parts.join(" · ");
 }
 
 function renderSubs() {
   const subs = S.subscriptions;
-  $("subsSummary").textContent = `${subs.length} 个订阅 · 共 ${S.nodeCount} 个节点`;
+  $("subsSummary").textContent = subsCount(subs.length, S.nodeCount);
   $("subsList").innerHTML = subs.map((sub) => `<div class="sub-row">
-      <div><div class="sub-name">${esc(sub.name)}${sub.url ? "" : '<span class="tag-file">文件</span>'}</div>
-        <div class="sub-meta" title="${esc(sub.url || "从文件导入")}">${esc(subMeta(sub))}</div></div>
+      <div><div class="sub-name">${esc(sub.name)}${sub.url ? "" : `<span class="tag-file">${L("文件", "file")}</span>`}</div>
+        <div class="sub-meta" title="${esc(sub.url || L("从文件导入", "Imported from a file"))}">${esc(subMeta(sub))}</div></div>
       <div class="sub-ops">
-        ${sub.url ? `<button class="ghost" data-sop="refresh" data-sid="${esc(sub.id)}">更新</button>` : ""}
-        <button class="ghost" data-sop="rename" data-sid="${esc(sub.id)}">改名</button>
-        <button class="ghost danger" data-sop="del" data-sid="${esc(sub.id)}">删除</button>
+        ${sub.url ? `<button class="ghost" data-sop="refresh" data-sid="${esc(sub.id)}">${L("更新", "Update")}</button>` : ""}
+        <button class="ghost" data-sop="rename" data-sid="${esc(sub.id)}">${L("改名", "Rename")}</button>
+        <button class="ghost danger" data-sop="del" data-sid="${esc(sub.id)}">${L("删除", "Delete")}</button>
       </div></div>`).join("");
 }
 
@@ -169,18 +204,20 @@ function renderSites() {
   $("globalWarn").classList.toggle("hidden", !S.globalMode);
   const fb = S.fallbacks || [];
   $("fallbackWarn").classList.toggle("hidden", !fb.length);
-  $("fallbackWarn").textContent = fb.length ? `订阅里已经没有这些选择对应的节点或地区，暂时改走默认地区：${fb.join("、")}` : "";
+  $("fallbackWarn").textContent = fb.length
+    ? L(`订阅里已经没有这些选择对应的节点或地区，暂时改走默认地区：${fb.join("、")}`, `These choices point to nodes or groups no longer in your subscriptions, so they use the default region for now: ${fb.map(dn).join(", ")}`)
+    : "";
 
   const cats = {};
   for (const s of S.sites) (cats[s.cat] ||= []).push(s);
   const order = Object.keys(cats).sort((a, b) => (CAT_ORDER.indexOf(a) + 99) % 99 - (CAT_ORDER.indexOf(b) + 99) % 99);
   $("siteGroups").innerHTML = order
-    .map((cat) => `<div class="cat-title">${esc(cat)}</div><div class="card site-card">${cats[cat]
+    .map((cat) => `<div class="cat-title">${esc(dn(cat))}</div><div class="card site-card">${cats[cat]
       .map((s) => `<div class="site-row" data-id="${esc(s.id)}">
-          <div><div class="site-name" data-edit="${esc(s.id)}" title="点击编辑包含的域名">${esc(s.name)}${s.edited ? '<span class="edited-tag">已改</span>' : ""}</div>
+          <div><div class="site-name" data-edit="${esc(s.id)}" title="${L("点击编辑包含的域名", "Click to edit the domains")}">${esc(dn(s.name))}${s.edited ? `<span class="edited-tag">${L("已改", "edited")}</span>` : ""}</div>
             <div class="site-sub">${esc(s.domains.join("  "))}</div></div>
           <select data-choice="${esc(s.id)}" class="${s.choice ? "set" : ""}">${targetOptions(s.choice, "site")}</select>
-          <div class="site-actions"><button class="ghost small-btn" data-check="${esc(s.id)}">检查</button></div>
+          <div class="site-actions"><button class="ghost small-btn" data-check="${esc(s.id)}">${L("检查", "Check")}</button></div>
           <div class="site-check hidden" id="chk-${esc(s.id)}"></div>
         </div>`)
       .join("")}</div>`)
@@ -190,30 +227,30 @@ function renderSites() {
   if (!$("rulesBox").dataset.dirty) rulesDraft = (S.customRules || []).map((r) => ({ ...r }));
   renderRules();
 
-  $("siteList").innerHTML = S.sites.map((s) => `<option value="${esc(s.url)}">${esc(s.name)}</option>`).join("");
+  $("siteList").innerHTML = S.sites.map((s) => `<option value="${esc(s.url)}">${esc(dn(s.name))}</option>`).join("");
 }
 
-const RULE_KINDS = [
-  ["suffix", "域名（含子域名）"],
-  ["domain", "完整域名"],
-  ["keyword", "域名关键词"],
-  ["ipcidr", "IP / IP 段"],
+const RULE_KINDS = () => [
+  ["suffix", L("域名（含子域名）", "Domain (with subdomains)")],
+  ["domain", L("完整域名", "Exact domain")],
+  ["keyword", L("域名关键词", "Domain keyword")],
+  ["ipcidr", L("IP / IP 段", "IP / IP range")],
 ];
 function renderRules() {
   $("rulesList").innerHTML = rulesDraft.length
     ? rulesDraft.map((r, i) => `<div class="rule-row" data-i="${i}">
-        <select data-k="kind">${RULE_KINDS.map(([v, l]) => `<option value="${v}"${v === r.kind ? " selected" : ""}>${l}</option>`).join("")}</select>
+        <select data-k="kind">${RULE_KINDS().map(([v, l]) => `<option value="${v}"${v === r.kind ? " selected" : ""}>${l}</option>`).join("")}</select>
         <input data-k="value" value="${esc(r.value)}" placeholder="${r.kind === "ipcidr" ? "1.2.3.0/24" : r.kind === "keyword" ? "google" : "example.com"}" spellcheck="false" />
         <select data-k="target">${targetOptions(r.target || "default", "rule")}</select>
-        <div class="ord"><button class="ghost" data-op="up" title="上移">↑</button><button class="ghost" data-op="down" title="下移">↓</button><button class="ghost danger" data-op="del" title="删除">✕</button></div>
+        <div class="ord"><button class="ghost" data-op="up" title="${L("上移", "Move up")}">↑</button><button class="ghost" data-op="down" title="${L("下移", "Move down")}">↓</button><button class="ghost danger" data-op="del" title="${L("删除", "Delete")}">✕</button></div>
       </div>`).join("")
-    : `<p class="muted small">还没有自定义规则。</p>`;
+    : `<p class="muted small">${L("还没有自定义规则。", "No custom rules yet.")}</p>`;
 }
 
 function renderSettings() {
   if (document.activeElement !== $("mixedPort")) $("mixedPort").value = S.mixedPort;
   if (document.activeElement !== $("ctlPort")) $("ctlPort").value = S.controllerPort;
-  $("dataDir").textContent = "数据目录：" + S.dataDir;
+  $("dataDir").textContent = L("数据目录：", "Data folder: ") + S.dataDir;
   renderSubs();
   renderTun();
   renderGroups();
@@ -222,10 +259,10 @@ function renderSettings() {
 
 function renderNodes() {
   $("nodesList").innerHTML = (S.regions || [])
-    .map((r) => `<div class="region-block"><div class="region-name">${esc(r.name)} <span class="muted small">${r.nodes.length} 个</span></div>
+    .map((r) => `<div class="region-block"><div class="region-name">${esc(dn(r.name))} <span class="muted small">${r.nodes.length}</span></div>
       <div class="node-grid">${r.nodes.map((n) => {
         const d = delays[n];
-        const txt = d == null ? (Object.keys(delays).length ? "超时" : "") : d + " ms";
+        const txt = d == null ? (Object.keys(delays).length ? L("超时", "timeout") : "") : d + " ms";
         return `<div class="node-item"><span class="n" title="${esc(n)}">${esc(n)}</span><span class="${delayClass(d)}">${txt}</span></div>`;
       }).join("")}</div></div>`)
     .join("");
@@ -235,34 +272,36 @@ function renderGroups() {
   const gs = S.groups || [];
   $("groupsList").innerHTML = gs.length
     ? gs.map((g, i) => `<div class="group-row">
-        <div><div class="group-title">${esc(g.name)} <span class="muted small">${g.matched.length} 个节点</span>${g.matched.length ? "" : '<span class="empty-tag">没有匹配的节点，暂不可选</span>'}</div>
-          <div class="group-kw" title="${esc([...g.keywords, ...g.nodes].join("\n"))}">${esc(g.keywords.length ? "关键词：" + g.keywords.join("  ") : "")}${g.keywords.length && g.nodes.length ? " · " : ""}${g.nodes.length ? `手动选了 ${g.nodes.length} 个节点` : ""}</div></div>
+        <div><div class="group-title">${esc(dn(g.name))} <span class="muted small">${nodesText(g.matched.length)}</span>${g.matched.length ? "" : `<span class="empty-tag">${L("没有匹配的节点，暂不可选", "No matching nodes, not selectable yet")}</span>`}</div>
+          <div class="group-kw" title="${esc([...g.keywords, ...g.nodes].join("\n"))}">${esc(g.keywords.length ? L("关键词：", "Keywords: ") + g.keywords.join("  ") : "")}${g.keywords.length && g.nodes.length ? " · " : ""}${g.nodes.length ? L(`手动选了 ${g.nodes.length} 个节点`, `${g.nodes.length} picked by hand`) : ""}</div></div>
         <div class="group-ops">
-          <button class="ghost" data-gop="up" data-gid="${esc(g.id)}" ${i === 0 ? "disabled" : ""} title="上移">↑</button>
-          <button class="ghost" data-gop="down" data-gid="${esc(g.id)}" ${i === gs.length - 1 ? "disabled" : ""} title="下移">↓</button>
-          <button class="ghost" data-gop="edit" data-gid="${esc(g.id)}">编辑</button>
-          <button class="ghost danger" data-gop="del" data-gid="${esc(g.id)}">删除</button>
+          <button class="ghost" data-gop="up" data-gid="${esc(g.id)}" ${i === 0 ? "disabled" : ""} title="${L("上移", "Move up")}">↑</button>
+          <button class="ghost" data-gop="down" data-gid="${esc(g.id)}" ${i === gs.length - 1 ? "disabled" : ""} title="${L("下移", "Move down")}">↓</button>
+          <button class="ghost" data-gop="edit" data-gid="${esc(g.id)}">${L("编辑", "Edit")}</button>
+          <button class="ghost danger" data-gop="del" data-gid="${esc(g.id)}">${L("删除", "Delete")}</button>
         </div></div>`).join("")
-    : `<p class="muted small">还没有分组，全部节点都在「其他」里。</p>`;
-  $("groupsSummary").textContent = `${gs.length} 个分组`;
+    : `<p class="muted small">${L("还没有分组，全部节点都在「其他」里。", "No groups yet; all nodes are in “Other”.")}</p>`;
+  $("groupsSummary").textContent = L(`${gs.length} 个分组`, `${gs.length} group${gs.length === 1 ? "" : "s"}`);
   const other = (S.regions || []).find((r) => !r.id);
-  $("otherInfo").textContent = other ? `还有 ${other.nodes.length} 个节点不在任何分组，归入「其他」。` : "所有节点都已分组。";
+  $("otherInfo").textContent = other
+    ? L(`还有 ${other.nodes.length} 个节点不在任何分组，归入「其他」。`, `${other.nodes.length} node(s) aren't in any group and go under “Other”.`)
+    : L("所有节点都已分组。", "All nodes are grouped.");
 }
 
 function renderTun() {
   const t = S.tun;
   const active = t.enabled && t.privileged;
   $("tunToggle").checked = t.enabled;
-  $("tunSummary").textContent = active ? "已开启" : t.enabled ? "未生效" : "关闭";
+  $("tunSummary").textContent = active ? L("已开启", "On") : t.enabled ? L("未生效", "Not active") : L("关闭", "Off");
   let hint = "", fix = "";
   if (t.platform === "mac") {
-    hint = "第一次开启会弹出系统密码框（输入开机密码），给代理内核授权。软件更新后需要再授权一次。";
-    if (t.enabled && !t.privileged) { hint = "⚠️ 增强模式还没生效：代理内核需要重新授权（更新软件后会这样）。"; fix = "授权"; }
+    hint = L("第一次开启会弹出系统密码框（输入开机密码），给代理内核授权。软件更新后需要再授权一次。", "The first time, macOS asks for your login password to authorize the proxy core. You'll need to authorize again after each app update.");
+    if (t.enabled && !t.privileged) { hint = L("⚠️ 增强模式还没生效：代理内核需要重新授权（更新软件后会这样）。", "⚠️ Enhanced mode isn't active yet: the proxy core needs to be authorized again (this happens after an app update)."); fix = L("授权", "Authorize"); }
   } else if (t.platform === "windows") {
-    hint = "需要以管理员身份运行 Clash for Young。开启后软件会以管理员身份重新启动（会弹出确认窗口）。";
-    if (t.enabled && !t.privileged) { hint = "⚠️ 增强模式还没生效：需要以管理员身份运行。"; fix = "以管理员身份重新启动"; }
+    hint = L("需要以管理员身份运行 Clash for Young。开启后软件会以管理员身份重新启动（会弹出确认窗口）。", "Clash for Young needs to run as administrator. Turning this on restarts the app as administrator (Windows will ask you to confirm).");
+    if (t.enabled && !t.privileged) { hint = L("⚠️ 增强模式还没生效：需要以管理员身份运行。", "⚠️ Enhanced mode isn't active yet: the app needs to run as administrator."); fix = L("以管理员身份重新启动", "Restart as administrator"); }
   } else {
-    hint = "这个系统暂不支持增强模式。";
+    hint = L("这个系统暂不支持增强模式。", "Enhanced mode isn't supported on this system.");
     $("tunToggle").disabled = true;
   }
   $("tunHint").textContent = hint;
@@ -295,10 +334,10 @@ $("welcomeForm").addEventListener("submit", async (e) => {
   const url = $("welcomeUrl").value.trim();
   if (!url) return;
   $("welcomeBtn").disabled = true;
-  $("welcomeMsg").textContent = "正在下载订阅…";
+  $("welcomeMsg").textContent = L("正在下载订阅…", "Downloading subscription…");
   try {
     S = await call("add_subscription", { url }, { quiet: true });
-    $("welcomeMsg").textContent = `找到 ${S.nodeCount} 个节点，正在连接…`;
+    $("welcomeMsg").textContent = L(`找到 ${S.nodeCount} 个节点，正在连接…`, `Found ${S.nodeCount} nodes, connecting…`);
     try { S = await call("connect", {}, { quiet: true }); } catch (err) { toast(String(err), true); }
     show("home");
     render();
@@ -323,7 +362,7 @@ $("welcomeFileBtn").addEventListener("click", () => {
 $("powerBtn").addEventListener("click", async () => {
   const btn = $("powerBtn");
   btn.classList.add("busy"); btn.disabled = true;
-  $("connText").textContent = S.connected ? "正在断开…" : "正在连接…";
+  $("connText").textContent = S.connected ? L("正在断开…", "Disconnecting…") : L("正在连接…", "Connecting…");
   try {
     S = await call(S.connected ? "disconnect" : "connect");
     status = null; tick = 0;
@@ -339,16 +378,16 @@ $("defaultSelect").addEventListener("change", async (e) => {
   try {
     S = await call("set_default_target", { target: e.target.value });
     tick = 0; await pollStatus();
-    toast("已切换默认地区");
+    toast(L("已切换默认地区", "Default region changed"));
   } catch (_) { render(); }
 });
 
 async function refreshSub(id) {
-  toast("正在更新订阅…");
+  toast(L("正在更新订阅…", "Updating subscriptions…"));
   try {
     S = await call("refresh_subscription", { id: id || null });
     render();
-    toast(`订阅已更新：共 ${S.nodeCount} 个节点`);
+    toast(L(`订阅已更新：共 ${S.nodeCount} 个节点`, `Subscriptions updated: ${S.nodeCount} nodes`));
   } catch (_) {
     await refreshState(); // 部分失败时其他订阅可能已更新
   }
@@ -359,12 +398,12 @@ $("subForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const url = $("subUrl").value.trim();
   if (!url) return;
-  toast("正在下载订阅…");
+  toast(L("正在下载订阅…", "Downloading subscription…"));
   try {
     S = await call("add_subscription", { url });
     $("subUrl").value = "";
     render();
-    toast(`已添加：现在共 ${S.nodeCount} 个节点`);
+    toast(L(`已添加：现在共 ${S.nodeCount} 个节点`, `Added: ${S.nodeCount} nodes in total`));
   } catch (_) {}
 });
 
@@ -383,7 +422,7 @@ $("subFileInput").addEventListener("change", async (e) => {
     } catch (_) {}
   }
   if (ok) {
-    toast(`已导入 ${ok} 个文件：现在共 ${S.nodeCount} 个节点`);
+    toast(L(`已导入 ${ok} 个文件：现在共 ${S.nodeCount} 个节点`, `Imported ${ok} file(s): ${S.nodeCount} nodes in total`));
     if (afterImport) await afterImport();
     render();
   }
@@ -395,13 +434,15 @@ $("subsList").addEventListener("click", async (e) => {
   const sub = S.subscriptions.find((x) => x.id === id);
   if (op === "refresh") return refreshSub(id);
   if (op === "rename") {
-    const name = await askText(`给「${sub.name}」改个名字`, sub.name);
+    const name = await askText(L(`给「${sub.name}」改个名字`, `Rename “${sub.name}”`), sub.name);
     if (!name) return;
     try { S = await call("rename_subscription", { id, name }); render(); } catch (_) {}
   }
   if (op === "del") {
     const last = S.subscriptions.length === 1;
-    if (!(await askConfirm(`删除订阅「${sub.name}」？它的 ${sub.nodeCount} 个节点会被移除。${last ? "这是最后一个订阅，删除后会断开连接。" : ""}`))) return;
+    const msg = L(`删除订阅「${sub.name}」？它的 ${sub.nodeCount} 个节点会被移除。${last ? "这是最后一个订阅，删除后会断开连接。" : ""}`,
+      `Delete subscription “${sub.name}”? Its ${sub.nodeCount} nodes will be removed.${last ? " This is your last subscription, so you'll be disconnected." : ""}`);
+    if (!(await askConfirm(msg))) return;
     try { S = await call("remove_subscription", { id }); render(); } catch (_) {}
   }
 });
@@ -413,7 +454,7 @@ $("siteGroups").addEventListener("change", async (e) => {
   try {
     S = await call("set_site_choice", { id, target: e.target.value });
     renderSites();
-    toast("已生效");
+    toast(L("已生效", "Applied"));
   } catch (_) { renderSites(); }
 });
 $("siteGroups").addEventListener("click", async (e) => {
@@ -423,12 +464,12 @@ $("siteGroups").addEventListener("click", async (e) => {
     const site = S.sites.find((s) => s.id === cid);
     const box = $("chk-" + cid);
     box.classList.remove("hidden");
-    box.innerHTML = `<span class="muted">正在检查…</span>`;
+    box.innerHTML = `<span class="muted">${L("正在检查…", "Checking…")}</span>`;
     try {
       const r = await call("check_url", { url: site.url }, { quiet: true });
       const d = r.nodeDelayMs != null ? ` · <span class="${delayClass(r.nodeDelayMs)}">${r.nodeDelayMs} ms</span>` : "";
-      const via = r.node === "DIRECT" ? "直连" : `${esc(r.node)}`;
-      box.innerHTML = `实际走 <b>${via}</b>${d} <span class="muted">（规则：${esc(r.rule)} ${esc(r.rulePayload)}）</span>`;
+      const via = r.node === "DIRECT" ? L("直连", "Direct") : `${esc(r.node)}`;
+      box.innerHTML = `${L("实际走", "Goes via")} <b>${via}</b>${d} <span class="muted">(${L("规则", "rule")}: ${esc(r.rule)} ${esc(r.rulePayload)})</span>`;
     } catch (err) {
       box.innerHTML = `<span class="delay-slow">${esc(err)}</span>`;
     }
@@ -445,7 +486,7 @@ $("addSiteForm").addEventListener("submit", async (e) => {
     S = await call("save_site", { site: { id: null, name: $("addSiteName").value.trim(), url, domains: [url] } });
     $("addSiteUrl").value = ""; $("addSiteName").value = "";
     renderSites();
-    toast("已添加到「我添加的」，可以给它选择走向");
+    toast(L("已添加到「我添加的」，可以给它选择走向", "Added under “Added by me”. Choose a route for it."));
   } catch (_) {}
 });
 
@@ -453,12 +494,12 @@ $("addSiteForm").addEventListener("submit", async (e) => {
 let editing = null;
 function openSiteDialog(site) {
   editing = site;
-  $("sdTitle").textContent = site.custom ? "编辑网站" : `编辑「${site.name}」的域名`;
+  $("sdTitle").textContent = site.custom ? L("编辑网站", "Edit site") : L(`编辑「${site.name}」的域名`, `Edit domains for “${dn(site.name)}”`);
   $("sdName").value = site.name;
   $("sdUrl").value = site.url;
   $("sdName").disabled = $("sdUrl").disabled = !site.custom;
   $("sdDomains").value = site.domains.join("\n");
-  $("sdDelete").textContent = site.custom ? "删除网站" : "恢复默认域名";
+  $("sdDelete").textContent = site.custom ? L("删除网站", "Delete site") : L("恢复默认域名", "Restore default domains");
   $("sdDelete").classList.toggle("hidden", !site.custom && !site.edited);
   $("siteDialog").showModal();
 }
@@ -470,7 +511,7 @@ $("siteDialogForm").addEventListener("submit", async (e) => {
     S = await call("save_site", { site: { id: editing.id, name: $("sdName").value, url: $("sdUrl").value, domains } });
     $("siteDialog").close();
     renderSites();
-    toast("已保存");
+    toast(L("已保存", "Saved"));
   } catch (_) {}
 });
 $("sdDelete").addEventListener("click", async () => {
@@ -510,7 +551,7 @@ $("saveRulesBtn").addEventListener("click", async () => {
     S = await call("set_custom_rules", { rules: rulesDraft });
     delete $("rulesBox").dataset.dirty;
     renderSites();
-    toast("规则已保存并生效");
+    toast(L("规则已保存并生效", "Rules saved and applied"));
   } catch (_) {}
 });
 
@@ -520,19 +561,19 @@ $("checkForm").addEventListener("submit", async (e) => {
   const url = $("checkUrl").value.trim();
   if (!url) return;
   $("checkBtn").disabled = true;
-  $("checkResult").innerHTML = `<p class="muted">正在经代理访问并读取分流信息…</p>`;
+  $("checkResult").innerHTML = `<p class="muted">${L("正在经代理访问并读取分流信息…", "Opening the URL through the proxy and reading the routing info…")}</p>`;
   try {
     const r = await call("check_url", { url }, { quiet: true });
-    const chain = r.chains.map((c) => `<span class="chip">${esc(c)}</span>`).join(`<span class="arrow">←</span>`);
+    const chain = r.chains.map((c) => `<span class="chip">${esc(dn(c))}</span>`).join(`<span class="arrow">←</span>`);
     const exit = r.exitIp ? `${esc(r.exitIp.ip)} <span class="muted">${esc(r.exitIp.location)} ${esc(r.exitIp.org)}</span>` : esc(r.exitIpError || "");
     $("checkResult").innerHTML = `<div class="check-res">
       ${r.warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
-      <div class="kv"><span class="k">节点</span><b>${esc(r.node === "DIRECT" ? "直连" : r.node)}</b></div>
-      <div class="kv"><span class="k">链路</span><div class="chain">${chain}</div></div>
-      <div class="kv"><span class="k">命中规则</span><span class="mono">${esc(r.rule)} ${esc(r.rulePayload)}</span></div>
-      <div class="kv"><span class="k">节点延迟</span><span class="${delayClass(r.nodeDelayMs)}">${r.nodeDelayMs != null ? r.nodeDelayMs + " ms" : esc(r.nodeDelayError || "-")}</span></div>
-      <div class="kv"><span class="k">本次请求</span><span>${r.requestMs} ms${r.httpStatus ? " · HTTP " + r.httpStatus : ""}</span></div>
-      <div class="kv"><span class="k">出口 IP</span><span class="mono">${exit}</span></div>
+      <div class="kv"><span class="k">${L("节点", "Node")}</span><b>${esc(r.node === "DIRECT" ? L("直连", "Direct") : r.node)}</b></div>
+      <div class="kv"><span class="k">${L("链路", "Chain")}</span><div class="chain">${chain}</div></div>
+      <div class="kv"><span class="k">${L("命中规则", "Matched rule")}</span><span class="mono">${esc(r.rule)} ${esc(r.rulePayload)}</span></div>
+      <div class="kv"><span class="k">${L("节点延迟", "Node latency")}</span><span class="${delayClass(r.nodeDelayMs)}">${r.nodeDelayMs != null ? r.nodeDelayMs + " ms" : esc(r.nodeDelayError || "-")}</span></div>
+      <div class="kv"><span class="k">${L("本次请求", "This request")}</span><span>${r.requestMs} ms${r.httpStatus ? " · HTTP " + r.httpStatus : ""}</span></div>
+      <div class="kv"><span class="k">${L("出口 IP", "Exit IP")}</span><span class="mono">${exit}</span></div>
     </div>`;
   } catch (err) {
     $("checkResult").innerHTML = `<div class="error">${esc(err)}</div>`;
@@ -543,10 +584,10 @@ $("checkForm").addEventListener("submit", async (e) => {
 
 $("delayBtn").addEventListener("click", async () => {
   $("delayBtn").disabled = true;
-  $("delayMsg").textContent = "测试中，最多 30 秒…";
+  $("delayMsg").textContent = L("测试中，最多 30 秒…", "Testing, up to 30 seconds…");
   try {
     delays = (await call("node_delays")) || {};
-    $("delayMsg").textContent = `${Object.keys(delays).length} 个节点可用`;
+    $("delayMsg").textContent = L(`${Object.keys(delays).length} 个节点可用`, `${Object.keys(delays).length} nodes available`);
     renderNodes();
   } catch (_) {
     $("delayMsg").textContent = "";
@@ -558,17 +599,17 @@ $("delayBtn").addEventListener("click", async () => {
 $("portsBtn").addEventListener("click", async () => {
   try {
     S = await call("set_ports", { mixedPort: +$("mixedPort").value, controllerPort: +$("ctlPort").value });
-    render(); toast("端口已保存");
+    render(); toast(L("端口已保存", "Ports saved"));
   } catch (_) {}
 });
 $("logBtn").addEventListener("click", async () => {
   const box = $("logBox");
-  box.textContent = (await call("core_log")) || "（暂无日志）";
+  box.textContent = (await call("core_log")) || L("（暂无日志）", "(no log yet)");
   box.classList.remove("hidden");
 });
 $("cfgBtn").addEventListener("click", async () => {
   const box = $("logBox");
-  box.textContent = (await call("current_config")) || "（还没有生成配置）";
+  box.textContent = (await call("current_config")) || L("（还没有生成配置）", "(no config generated yet)");
   box.classList.remove("hidden");
 });
 
@@ -576,13 +617,13 @@ $("cfgBtn").addEventListener("click", async () => {
 async function setTun(enabled) {
   $("tunToggle").disabled = true;
   try {
-    if (enabled) toast(S.tun.platform === "mac" ? "请在弹出的窗口里输入开机密码…" : "正在开启增强模式…");
+    if (enabled) toast(S.tun.platform === "mac" ? L("请在弹出的窗口里输入开机密码…", "Enter your login password in the prompt…") : L("正在开启增强模式…", "Turning on Enhanced mode…"));
     S = await call("set_tun", { enabled }, { quiet: true });
-    toast(enabled ? "增强模式已开启" : "增强模式已关闭");
+    toast(enabled ? L("增强模式已开启", "Enhanced mode is on") : L("增强模式已关闭", "Enhanced mode is off"));
   } catch (err) {
     if (String(err) === "NEED_ADMIN") {
       await refreshState();
-      if (await askConfirm("增强模式需要以管理员身份运行。现在以管理员身份重新启动 Clash for Young 吗？（会弹出系统确认窗口）")) {
+      if (await askConfirm(L("增强模式需要以管理员身份运行。现在以管理员身份重新启动 Clash for Young 吗？（会弹出系统确认窗口）", "Enhanced mode needs administrator rights. Restart Clash for Young as administrator now? (Windows will ask you to confirm.)"))) {
         try { await call("relaunch_as_admin"); } catch (_) {}
       }
     } else {
@@ -599,8 +640,8 @@ $("tunToggle").addEventListener("change", (e) => setTun(e.target.checked));
 $("exportMobileBtn").addEventListener("click", async () => {
   try {
     const path = await call("export_mobile_config");
-    $("exportMobileInfo").textContent = "已保存到「下载」文件夹：" + path.split(/[\\/]/).pop();
-    toast("已导出，文件在「下载」文件夹");
+    $("exportMobileInfo").textContent = L("已保存到「下载」文件夹：", "Saved to your Downloads folder: ") + path.split(/[\\/]/).pop();
+    toast(L("已导出，文件在「下载」文件夹", "Exported to your Downloads folder"));
   } catch (_) {}
 });
 $("tunFixBtn").addEventListener("click", async () => {
@@ -652,9 +693,9 @@ function renderGroupNodes() {
     .map((n) => {
       const byKw = kw.has(n) && !gdManual.has(n);
       return `<label class="gd-node${byKw ? " kw" : ""}"><input type="checkbox" data-node="${esc(n)}" ${gdManual.has(n) || byKw ? "checked" : ""} ${byKw ? "disabled" : ""}/>
-        <span>${esc(n)}</span>${byKw ? '<span class="why">关键词</span>' : ""}</label>`;
-    }).join("") || `<span class="muted small">没有节点</span>`;
-  $("gdCount").textContent = `共 ${gdMatched.size} 个节点`;
+        <span>${esc(n)}</span>${byKw ? `<span class="why">${L("关键词", "keyword")}</span>` : ""}</label>`;
+    }).join("") || `<span class="muted small">${L("没有节点", "No nodes")}</span>`;
+  $("gdCount").textContent = L(`共 ${gdMatched.size} 个节点`, `${gdMatched.size} nodes`);
 }
 let previewTimer;
 async function previewGroup() {
@@ -668,7 +709,7 @@ async function previewGroup() {
 }
 function openGroupDialog(g) {
   editingGroup = g || null;
-  $("gdTitle").textContent = g ? `编辑分组「${g.name}」` : "新建分组";
+  $("gdTitle").textContent = g ? L(`编辑分组「${g.name}」`, `Edit group “${g.name}”`) : L("新建分组", "New group");
   $("gdName").value = g ? g.name : "";
   $("gdKeywords").value = g ? g.keywords.join(", ") : "";
   $("gdFilter").value = "";
@@ -694,7 +735,7 @@ $("groupForm").addEventListener("submit", async (e) => {
     S = await call("save_group", { group: { id: editingGroup?.id || null, name: $("gdName").value, keywords: $("gdKeywords").value, nodes: [...gdManual] } });
     $("groupDialog").close();
     render();
-    toast("分组已保存并生效");
+    toast(L("分组已保存并生效", "Group saved and applied"));
   } catch (_) {}
 });
 $("groupsList").addEventListener("click", async (e) => {
@@ -704,7 +745,7 @@ $("groupsList").addEventListener("click", async (e) => {
   try {
     if (op === "edit") return openGroupDialog(g);
     if (op === "del") {
-      if (!(await askConfirm(`删除分组「${g.name}」？选了这个分组的网站会改走默认地区。`))) return;
+      if (!(await askConfirm(L(`删除分组「${g.name}」？选了这个分组的网站会改走默认地区。`, `Delete group “${dn(g.name)}”? Sites that use it will switch to the default region.`)))) return;
       S = await call("delete_group", { id });
     }
     if (op === "up" || op === "down") S = await call("move_group", { id, delta: op === "up" ? -1 : 1 });
@@ -712,8 +753,8 @@ $("groupsList").addEventListener("click", async (e) => {
   } catch (_) {}
 });
 $("resetGroupsBtn").addEventListener("click", async () => {
-  if (!(await askConfirm("恢复成默认的「美国」「台湾」两个分组？你新建的分组会被删除。"))) return;
-  try { S = await call("reset_groups"); render(); toast("已恢复默认分组"); } catch (_) {}
+  if (!(await askConfirm(L("恢复成默认的「美国」「台湾」两个分组？你新建的分组会被删除。", "Restore the default “United States” and “Taiwan” groups? Groups you created will be deleted.")))) return;
+  try { S = await call("reset_groups"); render(); toast(L("已恢复默认分组", "Default groups restored")); } catch (_) {}
 });
 
 // ───────── 规则 / 全局 ─────────
@@ -725,7 +766,7 @@ $("modeSeg").addEventListener("click", async (e) => {
   try {
     S = await call("set_global_mode", { global });
     render();
-    toast(global ? "已切换到全局模式" : "已切换到规则模式");
+    toast(global ? L("已切换到全局模式", "Switched to Global mode") : L("已切换到规则模式", "Switched to Rule mode"));
   } catch (_) {}
 });
 
@@ -733,21 +774,24 @@ $("modeSeg").addEventListener("click", async (e) => {
 let updateTimer = null;
 function renderUpdate() {
   const u = S.update;
-  const dev = S.version === "开发版";
+  const dev = S.version === "dev";
+  const cur = versionText(S.version);
   $("updateDot").classList.toggle("hidden", !u);
-  $("updateSummary").textContent = u ? `有新版本 ${u.version}` : dev ? "开发版" : `当前 ${S.version}`;
+  $("updateSummary").textContent = u ? L(`有新版本 ${u.version}`, `New version ${u.version}`) : dev ? cur : L(`当前 ${cur}`, `Current ${cur}`);
   let text;
-  if (!u) text = dev ? "本地开发版不检查更新。" : `现在是 ${S.version}。软件会定期在后台检查新版本，有更新时这里会出现红点。`;
+  if (!u) text = dev ? L("本地开发版不检查更新。", "Local development builds don't check for updates.")
+    : L(`现在是 ${cur}。软件会定期在后台检查新版本，有更新时这里会出现红点。`, `You're on ${cur}. The app checks for new versions in the background; a red dot appears here when one is available.`);
   else if (u.installing) {
-    text = u.total && u.downloaded >= u.total ? "正在安装，装好后会自动重新打开…"
-      : u.total ? `正在下载 ${fmtBytes(u.downloaded)} / ${fmtBytes(u.total)}…` : `正在下载 ${fmtBytes(u.downloaded)}…`;
+    text = u.total && u.downloaded >= u.total ? L("正在安装，装好后会自动重新打开…", "Installing. The app will reopen when it's done…")
+      : u.total ? L(`正在下载 ${fmtBytes(u.downloaded)} / ${fmtBytes(u.total)}…`, `Downloading ${fmtBytes(u.downloaded)} / ${fmtBytes(u.total)}…`)
+      : L(`正在下载 ${fmtBytes(u.downloaded)}…`, `Downloading ${fmtBytes(u.downloaded)}…`);
   } else if (u.error) text = u.error;
-  else text = `新版本 ${u.version} 可以更新（现在是 ${S.version}）。更新时会短暂断开，软件重新打开后自动连上。`;
+  else text = L(`新版本 ${u.version} 可以更新（现在是 ${cur}）。更新时会短暂断开，软件重新打开后自动连上。`, `Version ${u.version} is available (you're on ${cur}). You'll be disconnected briefly during the update; the app reconnects when it reopens.`);
   $("updateText").textContent = text;
   $("updateText").classList.toggle("muted", !(u && u.error));
   $("updateBtn").classList.toggle("hidden", !u);
   $("updateBtn").disabled = !!(u && u.installing);
-  $("updateBtn").textContent = u && u.installing ? "更新中…" : u && u.error ? "重试" : "一键更新";
+  $("updateBtn").textContent = u && u.installing ? L("更新中…", "Updating…") : u && u.error ? L("重试", "Retry") : L("一键更新", "Update now");
   $("checkUpdateBtn").disabled = dev || !!(u && u.installing);
   $("updateProgress").classList.toggle("hidden", !(u && u.installing));
   $("updateProgressBar").style.width = u && u.total ? `${Math.min(100, (u.downloaded / u.total) * 100)}%` : "5%";
@@ -768,13 +812,27 @@ $("updateBtn").addEventListener("click", async () => {
   await refreshState(); // 失败时显示错误；成功时软件已重启，不会走到这里
 });
 $("checkUpdateBtn").addEventListener("click", async () => {
-  toast("正在检查更新…");
+  toast(L("正在检查更新…", "Checking for updates…"));
   try {
     S = await call("check_update");
     render();
-    toast(S.update ? `发现新版本 ${S.update.version}` : "已经是最新版本");
+    toast(S.update ? L(`发现新版本 ${S.update.version}`, `Found version ${S.update.version}`) : L("已经是最新版本", "You're up to date"));
   } catch (_) {}
 });
+
+// ───────── 语言 ─────────
+function renderLang() {
+  $("langSelect").value = S.language || "";
+  $("langSummary").textContent = !S.language ? L("跟随系统", "Follow system") : S.language === "en" ? "English" : "中文";
+}
+async function setLanguage(language) {
+  try {
+    S = await call("set_language", { language });
+    render();
+  } catch (_) {}
+}
+$("langSelect").addEventListener("change", (e) => setLanguage(e.target.value));
+$("welcomeLang").addEventListener("click", (e) => { const l = e.target.dataset.lang; if (l) setLanguage(l); });
 
 // ───────── 启动 ─────────
 (async () => {

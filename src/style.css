@@ -139,7 +139,7 @@ button.danger { color: var(--slow); }
 
 .adv summary { cursor: pointer; font-weight: 600; }
 .adv[open] summary { margin-bottom: 8px; }
-.rule-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 170px) auto; gap: 8px; align-items: center; margin-bottom: 6px; }
+.rule-row { display: grid; grid-template-columns: 175px minmax(0, 1fr) minmax(0, 170px) auto; gap: 8px; align-items: center; margin-bottom: 6px; }
 .rule-row .ord { display: flex; gap: 2px; }
 .rule-row button { padding: 4px 8px; }
 

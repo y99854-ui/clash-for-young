@@ -6,13 +6,17 @@
   <title>Clash for Young</title>
   <link rel="stylesheet" href="style.css" />
 </head>
+<!--
+  中英文：带 data-en 的元素，英文界面时内容换成 data-en 里的文字（可含 <b> 等）；
+  data-en-placeholder / data-en-title 对应 placeholder / title。动态文字在 main.js 里用 L("中文", "English")。
+-->
 <body>
   <header class="topbar">
     <div class="brand"><img id="brandCat" src="assets/cat-sleep.png" alt="" />Clash for Young</div>
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-view="home">首页</button>
-      <button class="tab" data-view="sites">网站</button>
-      <button class="tab" data-view="settings">设置</button>
+      <button class="tab active" data-view="home" data-en="Home">首页</button>
+      <button class="tab" data-view="sites" data-en="Sites">网站</button>
+      <button class="tab" data-view="settings" data-en="Settings">设置</button>
     </nav>
   </header>
 
@@ -21,13 +25,14 @@
   <!-- ───────── 第一次打开 ───────── -->
   <main id="view-welcome" class="hidden">
     <div class="card welcome">
-      <h1>欢迎使用 Clash for Young</h1>
-      <p>只需要一步：粘贴你的订阅链接。</p>
+      <h1 data-en="Welcome to Clash for Young">欢迎使用 Clash for Young</h1>
+      <p data-en="Just one step: paste your subscription link.">只需要一步：粘贴你的订阅链接。</p>
       <form id="welcomeForm" class="row">
-        <input id="welcomeUrl" placeholder="https://… （在机场后台复制 Clash 订阅链接）" autocomplete="off" spellcheck="false" />
-        <button type="submit" id="welcomeBtn">开始</button>
+        <input id="welcomeUrl" placeholder="https://… （在机场后台复制 Clash 订阅链接）" data-en-placeholder="https://… (copy the Clash subscription link from your provider's dashboard)" autocomplete="off" spellcheck="false" />
+        <button type="submit" id="welcomeBtn" data-en="Start">开始</button>
       </form>
-      <p class="muted small">没有链接？也可以 <button type="button" class="linklike" id="welcomeFileBtn">从文件导入</button>（Clash / mihomo 的 .yaml 配置或订阅文件）。</p>
+      <p class="muted small"><span data-en="No link? You can also">没有链接？也可以</span> <button type="button" class="linklike" id="welcomeFileBtn" data-en="import from a file">从文件导入</button><span data-en=" (a Clash / mihomo .yaml config or subscription file).">（Clash / mihomo 的 .yaml 配置或订阅文件）。</span></p>
+      <p class="muted small" id="welcomeLang"></p>
       <p id="welcomeMsg" class="muted small"></p>
     </div>
   </main>
@@ -36,11 +41,11 @@
   <main id="view-home" class="hidden">
     <div id="homeError" class="error hidden"></div>
     <section class="card hero">
-      <button id="powerBtn" class="power" title="点小猫连接 / 断开">
+      <button id="powerBtn" class="power" title="点小猫连接 / 断开" data-en-title="Click the cat to connect / disconnect">
         <img id="catImg" src="assets/cat-sleep.png" alt="" />
       </button>
       <div class="hero-text">
-        <div class="conn-line"><span id="connText" class="conn-text">未连接</span><span id="tunTag" class="tun-tag hidden">增强模式</span><span id="globalTag" class="tun-tag hidden">全局</span></div>
+        <div class="conn-line"><span id="connText" class="conn-text">未连接</span><span id="tunTag" class="tun-tag hidden" data-en="Enhanced">增强模式</span><span id="globalTag" class="tun-tag hidden" data-en="Global">全局</span></div>
         <div id="nowText" class="muted"></div>
       </div>
     </section>
@@ -48,18 +53,18 @@
     <section class="card">
       <div class="sub-line">
         <div>
-          <div class="field-title">模式</div>
+          <div class="field-title" data-en="Mode">模式</div>
           <div id="modeHint" class="muted small"></div>
         </div>
         <div class="seg" id="modeSeg">
-          <button type="button" data-global="0">规则</button>
-          <button type="button" data-global="1">全局</button>
+          <button type="button" data-global="0" data-en="Rule">规则</button>
+          <button type="button" data-global="1" data-en="Global">全局</button>
         </div>
       </div>
     </section>
 
     <section class="card">
-      <div class="field-title">默认地区</div>
+      <div class="field-title" data-en="Default region">默认地区</div>
       <p id="defaultHint" class="muted small"></p>
       <select id="defaultSelect"></select>
     </section>
@@ -67,10 +72,10 @@
     <section class="card">
       <div class="sub-line">
         <div>
-          <div class="field-title">订阅</div>
+          <div class="field-title" data-en="Subscriptions">订阅</div>
           <div id="subInfo" class="muted small"></div>
         </div>
-        <button id="refreshBtn" class="ghost">更新订阅</button>
+        <button id="refreshBtn" class="ghost" data-en="Update subscriptions">更新订阅</button>
       </div>
       <div id="homeSubs"></div>
     </section>
@@ -78,28 +83,28 @@
 
   <!-- ───────── 网站 ───────── -->
   <main id="view-sites" class="hidden">
-    <div id="globalWarn" class="warn hidden">现在是<b>全局模式</b>：所有网站都走首页的默认地区，这里的设置暂时不生效。切回「规则」模式后恢复。</div>
+    <div id="globalWarn" class="warn hidden" data-en="You're in &lt;b&gt;Global mode&lt;/b&gt;: every site uses the default region on the Home page, so the settings here are paused. They come back when you switch to Rule mode.">现在是<b>全局模式</b>：所有网站都走首页的默认地区，这里的设置暂时不生效。切回「规则」模式后恢复。</div>
     <div id="fallbackWarn" class="warn hidden"></div>
-    <p class="muted small">给每个网站选择走向。<b>自动</b> = 跟随首页的默认地区（国内网站直连）。改完立即生效，可以点「检查」确认。</p>
+    <p class="muted small" data-en="Choose a route for each site. &lt;b&gt;Auto&lt;/b&gt; = follow the default region on the Home page (China sites go direct). Changes apply right away; click “Check” to confirm.">给每个网站选择走向。<b>自动</b> = 跟随首页的默认地区（国内网站直连）。改完立即生效，可以点「检查」确认。</p>
     <div id="siteGroups"></div>
 
     <section class="card">
-      <div class="field-title">添加网站</div>
+      <div class="field-title" data-en="Add a site">添加网站</div>
       <form id="addSiteForm" class="row">
-        <input id="addSiteUrl" placeholder="网址或域名，例如 example.com" autocomplete="off" spellcheck="false" />
-        <input id="addSiteName" placeholder="名称（可不填）" class="narrow-input" />
-        <button type="submit">添加</button>
+        <input id="addSiteUrl" placeholder="网址或域名，例如 example.com" data-en-placeholder="URL or domain, e.g. example.com" autocomplete="off" spellcheck="false" />
+        <input id="addSiteName" placeholder="名称（可不填）" data-en-placeholder="Name (optional)" class="narrow-input" />
+        <button type="submit" data-en="Add">添加</button>
       </form>
     </section>
 
     <details class="card adv fold" id="rulesBox">
-      <summary><span class="fold-title">高级：自定义规则</span></summary>
-      <p class="muted small">按域名、关键词或 IP 段指定走向。从上到下依次匹配，优先于上面的网站设置。</p>
+      <summary><span class="fold-title" data-en="Advanced: custom rules">高级：自定义规则</span></summary>
+      <p class="muted small" data-en="Route by domain, keyword or IP range. Rules are matched top to bottom and take priority over the site settings above.">按域名、关键词或 IP 段指定走向。从上到下依次匹配，优先于上面的网站设置。</p>
       <div id="rulesList"></div>
       <div class="row actions">
-        <button id="addRuleBtn" class="ghost">＋ 添加规则</button>
+        <button id="addRuleBtn" class="ghost" data-en="＋ Add rule">＋ 添加规则</button>
         <span class="spacer"></span>
-        <button id="saveRulesBtn">保存规则</button>
+        <button id="saveRulesBtn" data-en="Save rules">保存规则</button>
       </div>
     </details>
   </main>
@@ -107,50 +112,50 @@
   <!-- ───────── 设置 ───────── -->
   <main id="view-settings" class="hidden">
     <details class="card fold" id="subsBox">
-      <summary><span class="fold-title">订阅</span><span id="subsSummary" class="muted small"></span></summary>
-      <p class="muted small">可以添加多个订阅，所有订阅的节点合在一起使用、一起分组。链接订阅每 6 小时自动更新；从文件导入的订阅不会自动更新。</p>
+      <summary><span class="fold-title" data-en="Subscriptions">订阅</span><span id="subsSummary" class="muted small"></span></summary>
+      <p class="muted small" data-en="You can add several subscriptions; their nodes are combined and grouped together. Link subscriptions update every 6 hours; subscriptions imported from a file don't update.">可以添加多个订阅，所有订阅的节点合在一起使用、一起分组。链接订阅每 6 小时自动更新；从文件导入的订阅不会自动更新。</p>
       <div id="subsList" class="subs-list"></div>
       <form id="subForm" class="row">
-        <input id="subUrl" placeholder="粘贴订阅链接 https://…" autocomplete="off" spellcheck="false" />
-        <button type="submit">添加链接</button>
-        <button type="button" id="subFileBtn" class="ghost">从文件导入</button>
+        <input id="subUrl" placeholder="粘贴订阅链接 https://…" data-en-placeholder="Paste a subscription link https://…" autocomplete="off" spellcheck="false" />
+        <button type="submit" data-en="Add link">添加链接</button>
+        <button type="button" id="subFileBtn" class="ghost" data-en="Import from file">从文件导入</button>
       </form>
-      <div class="row actions"><span class="spacer"></span><button type="button" id="refreshAllBtn" class="ghost small-btn">全部更新</button></div>
+      <div class="row actions"><span class="spacer"></span><button type="button" id="refreshAllBtn" class="ghost small-btn" data-en="Update all">全部更新</button></div>
     </details>
 
     <details class="card fold" id="groupsBox">
-      <summary><span class="fold-title">节点分组</span><span id="groupsSummary" class="muted small"></span></summary>
+      <summary><span class="fold-title" data-en="Node groups">节点分组</span><span id="groupsSummary" class="muted small"></span></summary>
       <div class="sub-line">
-        <div class="muted small">按节点名里的关键词把节点归成一组，组内自动选最快的节点。首页和网站页都可以选分组。</div>
-        <button id="addGroupBtn" class="ghost">＋ 新建分组</button>
+        <div class="muted small" data-en="Group nodes by keywords in their names; each group automatically picks its fastest node. Groups can be chosen on the Home and Sites pages.">按节点名里的关键词把节点归成一组，组内自动选最快的节点。首页和网站页都可以选分组。</div>
+        <button id="addGroupBtn" class="ghost" data-en="＋ New group">＋ 新建分组</button>
       </div>
       <div id="groupsList" class="groups-list"></div>
       <div class="row actions">
         <span id="otherInfo" class="muted small"></span>
         <span class="spacer"></span>
-        <button id="resetGroupsBtn" class="ghost small-btn">恢复默认分组</button>
+        <button id="resetGroupsBtn" class="ghost small-btn" data-en="Restore default groups">恢复默认分组</button>
       </div>
     </details>
 
     <details class="card fold" id="tunBox">
-      <summary><span class="fold-title">增强模式（TUN）</span><span id="tunSummary" class="muted small"></span></summary>
-      <p class="muted small">普通模式通过系统代理工作，浏览器和大部分软件都够用。增强模式会接管电脑上<b>所有程序</b>的网络，包括终端命令、游戏、不认系统代理的软件。</p>
-      <p class="muted small">在意隐私的话建议开启：普通模式下浏览器的 WebRTC（网页视频通话用的技术）会绕过代理，网站能看到你的真实 IP；增强模式会把它和 IPv6 流量一起接管。</p>
+      <summary><span class="fold-title" data-en="Enhanced mode (TUN)">增强模式（TUN）</span><span id="tunSummary" class="muted small"></span></summary>
+      <p class="muted small" data-en="Normal mode works through the system proxy, which is enough for browsers and most apps. Enhanced mode takes over the network for &lt;b&gt;all apps&lt;/b&gt;, including terminal commands, games and apps that ignore the system proxy.">普通模式通过系统代理工作，浏览器和大部分软件都够用。增强模式会接管电脑上<b>所有程序</b>的网络，包括终端命令、游戏、不认系统代理的软件。</p>
+      <p class="muted small" data-en="Recommended if you care about privacy: in normal mode the browser's WebRTC (used for video calls on web pages) bypasses the proxy, so sites can see your real IP. Enhanced mode takes over WebRTC and IPv6 traffic too.">在意隐私的话建议开启：普通模式下浏览器的 WebRTC（网页视频通话用的技术）会绕过代理，网站能看到你的真实 IP；增强模式会把它和 IPv6 流量一起接管。</p>
       <p class="muted small" id="tunHint"></p>
       <div class="row actions">
-        <label class="switch"><input type="checkbox" id="tunToggle" /><span>开启增强模式</span></label>
+        <label class="switch"><input type="checkbox" id="tunToggle" /><span data-en="Turn on Enhanced mode">开启增强模式</span></label>
         <span class="spacer"></span>
         <button type="button" id="tunFixBtn" class="ghost hidden"></button>
       </div>
     </details>
 
     <details class="card fold" id="mobileBox">
-      <summary><span class="fold-title">手机</span><span class="muted small">导出配置给手机用</span></summary>
-      <p class="muted small">把这里的分组、网站选择和自定义规则做成一份配置文件，导入手机软件后，手机的分流和电脑一样。订阅里的节点会在手机上自动更新；改了分组或规则后需要重新导出。</p>
-      <p class="muted small"><b>iPhone</b>：App Store 下载 <b>Clash Mi</b>（免费）。<b>安卓</b>：Clash Meta for Android 或 FlClash。<br />导出后用 AirDrop、微信等把文件发到手机，在这些软件里导入。</p>
-      <p class="muted small">⚠️ 文件里有你的订阅链接，只发给自己的手机，不要分享给别人。</p>
+      <summary><span class="fold-title" data-en="Phone">手机</span><span class="muted small" data-en="Export a config for your phone">导出配置给手机用</span></summary>
+      <p class="muted small" data-en="Turns your groups, site choices and custom rules into one config file. Import it into a phone app and your phone routes the same way as this computer. Nodes from your subscriptions update on the phone automatically; export again after changing groups or rules.">把这里的分组、网站选择和自定义规则做成一份配置文件，导入手机软件后，手机的分流和电脑一样。订阅里的节点会在手机上自动更新；改了分组或规则后需要重新导出。</p>
+      <p class="muted small" data-en="&lt;b&gt;iPhone&lt;/b&gt;: get &lt;b&gt;Clash Mi&lt;/b&gt; (free) from the App Store. &lt;b&gt;Android&lt;/b&gt;: Clash Meta for Android or FlClash.&lt;br /&gt;After exporting, send the file to your phone (AirDrop, a chat app, etc.) and import it in one of these apps."><b>iPhone</b>：App Store 下载 <b>Clash Mi</b>（免费）。<b>安卓</b>：Clash Meta for Android 或 FlClash。<br />导出后用 AirDrop、微信等把文件发到手机，在这些软件里导入。</p>
+      <p class="muted small" data-en="⚠️ The file contains your subscription link. Only send it to your own phone; don't share it.">⚠️ 文件里有你的订阅链接，只发给自己的手机，不要分享给别人。</p>
       <div class="row actions">
-        <button type="button" id="exportMobileBtn">导出手机配置</button>
+        <button type="button" id="exportMobileBtn" data-en="Export phone config">导出手机配置</button>
         <span id="exportMobileInfo" class="muted small"></span>
       </div>
     </details>
@@ -158,65 +163,76 @@
     <input type="file" id="subFileInput" accept=".yaml,.yml,.txt,.conf,text/yaml,text/plain" multiple class="hidden" />
 
     <details class="card adv fold" id="checkBox">
-      <summary><span class="fold-title">高级：分流检查</span></summary>
-      <p class="muted small">输入网址，看它实际命中了哪条规则、走了哪个节点。</p>
+      <summary><span class="fold-title" data-en="Advanced: routing check">高级：分流检查</span></summary>
+      <p class="muted small" data-en="Enter a URL to see which rule it actually matched and which node it used.">输入网址，看它实际命中了哪条规则、走了哪个节点。</p>
       <form id="checkForm" class="row">
-        <input id="checkUrl" list="siteList" placeholder="例如 discord.com" autocomplete="off" spellcheck="false" />
+        <input id="checkUrl" list="siteList" placeholder="例如 discord.com" data-en-placeholder="e.g. discord.com" autocomplete="off" spellcheck="false" />
         <datalist id="siteList"></datalist>
-        <button type="submit" id="checkBtn">检查</button>
+        <button type="submit" id="checkBtn" data-en="Check">检查</button>
       </form>
       <div id="checkResult"></div>
     </details>
 
     <details class="card adv fold" id="nodesBox">
-      <summary><span class="fold-title">高级：节点列表</span></summary>
-      <div class="row actions"><button id="delayBtn" class="ghost">测试全部节点延迟</button><span id="delayMsg" class="muted small"></span></div>
+      <summary><span class="fold-title" data-en="Advanced: node list">高级：节点列表</span></summary>
+      <div class="row actions"><button id="delayBtn" class="ghost" data-en="Test all node latencies">测试全部节点延迟</button><span id="delayMsg" class="muted small"></span></div>
       <div id="nodesList"></div>
     </details>
 
     <details class="card adv fold">
-      <summary><span class="fold-title">高级：端口与日志</span></summary>
+      <summary><span class="fold-title" data-en="Advanced: ports &amp; logs">高级：端口与日志</span></summary>
       <div class="row">
-        <label>代理端口<input id="mixedPort" type="number" /></label>
-        <label>控制端口<input id="ctlPort" type="number" /></label>
-        <button id="portsBtn" class="ghost">保存端口</button>
+        <label><span data-en="Proxy port">代理端口</span><input id="mixedPort" type="number" /></label>
+        <label><span data-en="Control port">控制端口</span><input id="ctlPort" type="number" /></label>
+        <button id="portsBtn" class="ghost" data-en="Save ports">保存端口</button>
       </div>
-      <p class="muted small">端口被其他代理软件占用时，软件会自动换一个空闲端口。</p>
+      <p class="muted small" data-en="If another proxy app is using a port, the app switches to a free one automatically.">端口被其他代理软件占用时，软件会自动换一个空闲端口。</p>
       <div class="row actions">
-        <button id="logBtn" class="ghost">查看内核日志</button>
-        <button id="cfgBtn" class="ghost">查看生成的配置</button>
+        <button id="logBtn" class="ghost" data-en="View core log">查看内核日志</button>
+        <button id="cfgBtn" class="ghost" data-en="View generated config">查看生成的配置</button>
       </div>
       <pre id="logBox" class="logbox hidden"></pre>
       <p id="dataDir" class="muted small"></p>
     </details>
 
+    <details class="card fold" id="langBox">
+      <summary><span class="fold-title">语言 · Language</span><span id="langSummary" class="muted small"></span></summary>
+      <div class="row actions">
+        <select id="langSelect" class="narrow-input">
+          <option value="" data-en="Follow system">跟随系统</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </details>
+
     <details class="card fold" id="updateBox">
-      <summary><span class="fold-title">软件更新<span id="updateDot" class="red-dot hidden"></span></span><span id="updateSummary" class="muted small"></span></summary>
+      <summary><span class="fold-title"><span data-en="Software update">软件更新</span><span id="updateDot" class="red-dot hidden"></span></span><span id="updateSummary" class="muted small"></span></summary>
       <p id="updateText" class="muted small"></p>
       <div id="updateProgress" class="usage hidden"><div id="updateProgressBar"></div></div>
-      <details id="updateNotesBox" class="update-notes hidden"><summary class="small">更新内容</summary><pre id="updateNotes"></pre></details>
+      <details id="updateNotesBox" class="update-notes hidden"><summary class="small" data-en="What's new">更新内容</summary><pre id="updateNotes"></pre></details>
       <div class="row actions">
-        <button type="button" id="checkUpdateBtn" class="ghost">检查更新</button>
+        <button type="button" id="checkUpdateBtn" class="ghost" data-en="Check for updates">检查更新</button>
         <span class="spacer"></span>
         <button type="button" id="updateBtn" class="hidden">一键更新</button>
       </div>
     </details>
 
-    <p class="muted small about">Clash for Young <span id="appVersion"></span> · 基于 mihomo 内核 · GPL-3.0</p>
+    <p class="muted small about">Clash for Young <span id="appVersion"></span> · <span data-en="powered by the mihomo core">基于 mihomo 内核</span> · GPL-3.0</p>
   </main>
 
   <!-- 编辑网站的对话框 -->
   <dialog id="siteDialog">
     <form method="dialog" id="siteDialogForm">
-      <div class="field-title" id="sdTitle">编辑网站</div>
-      <label class="small muted">名称<input id="sdName" /></label>
-      <label class="small muted">检查用的网址<input id="sdUrl" /></label>
-      <label class="small muted">包含的域名（每行一个，自动包含子域名）<textarea id="sdDomains" rows="7" spellcheck="false"></textarea></label>
+      <div class="field-title" id="sdTitle"></div>
+      <label class="small muted"><span data-en="Name">名称</span><input id="sdName" /></label>
+      <label class="small muted"><span data-en="URL used for checks">检查用的网址</span><input id="sdUrl" /></label>
+      <label class="small muted"><span data-en="Domains (one per line; subdomains are included)">包含的域名（每行一个，自动包含子域名）</span><textarea id="sdDomains" rows="7" spellcheck="false"></textarea></label>
       <div class="row actions">
-        <button type="button" id="sdDelete" class="ghost danger">删除</button>
+        <button type="button" id="sdDelete" class="ghost danger"></button>
         <span class="spacer"></span>
-        <button type="button" id="sdCancel" class="ghost">取消</button>
-        <button type="submit" id="sdSave">保存</button>
+        <button type="button" id="sdCancel" class="ghost" data-en="Cancel">取消</button>
+        <button type="submit" id="sdSave" data-en="Save">保存</button>
       </div>
     </form>
   </dialog>
@@ -224,20 +240,20 @@
   <!-- 编辑分组的对话框 -->
   <dialog id="groupDialog" class="wide">
     <form method="dialog" id="groupForm">
-      <div class="field-title" id="gdTitle">新建分组</div>
-      <label class="small muted">名称<input id="gdName" placeholder="例如 日本" /></label>
-      <label class="small muted">关键词（节点名包含任一关键词就归入此组；用逗号分隔；2–3 个字母的英文缩写会整词匹配）
-        <input id="gdKeywords" placeholder="例如 日本, 东京, JP, 🇯🇵" spellcheck="false" /></label>
+      <div class="field-title" id="gdTitle"></div>
+      <label class="small muted"><span data-en="Name">名称</span><input id="gdName" placeholder="例如 日本" data-en-placeholder="e.g. Japan" /></label>
+      <label class="small muted"><span data-en="Keywords (a node joins this group if its name contains any keyword; separate with commas; 2–3 letter abbreviations match whole words only)">关键词（节点名包含任一关键词就归入此组；用逗号分隔；2–3 个字母的英文缩写会整词匹配）</span>
+        <input id="gdKeywords" placeholder="例如 日本, 东京, JP, 🇯🇵" data-en-placeholder="e.g. Japan, Tokyo, JP, 🇯🇵" spellcheck="false" /></label>
       <div class="small muted gd-nodes-head">
-        <span>也可以手动勾选节点</span>
-        <input id="gdFilter" placeholder="筛选节点" class="gd-filter" />
+        <span data-en="You can also tick nodes by hand">也可以手动勾选节点</span>
+        <input id="gdFilter" placeholder="筛选节点" data-en-placeholder="Filter nodes" class="gd-filter" />
       </div>
       <div id="gdNodes" class="gd-nodes"></div>
       <div class="row actions">
         <span id="gdCount" class="muted small"></span>
         <span class="spacer"></span>
-        <button type="button" id="gdCancel" class="ghost">取消</button>
-        <button type="submit">保存</button>
+        <button type="button" id="gdCancel" class="ghost" data-en="Cancel">取消</button>
+        <button type="submit" data-en="Save">保存</button>
       </div>
     </form>
   </dialog>
@@ -247,8 +263,8 @@
       <div class="field-title" id="tdTitle"></div>
       <input id="tdInput" />
       <div class="row actions"><span class="spacer"></span>
-        <button type="button" id="tdNo" class="ghost">取消</button>
-        <button type="submit" id="tdOk">确定</button>
+        <button type="button" id="tdNo" class="ghost" data-en="Cancel">取消</button>
+        <button type="submit" id="tdOk" data-en="OK">确定</button>
       </div>
     </form>
   </dialog>
@@ -256,8 +272,8 @@
   <dialog id="confirmDialog">
     <p id="cfText"></p>
     <div class="row actions"><span class="spacer"></span>
-      <button type="button" id="cfNo" class="ghost">取消</button>
-      <button type="button" id="cfYes">确定</button>
+      <button type="button" id="cfNo" class="ghost" data-en="Cancel">取消</button>
+      <button type="button" id="cfYes" data-en="OK">确定</button>
     </div>
   </dialog>
 
