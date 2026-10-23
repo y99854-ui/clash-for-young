@@ -1,12 +1,8 @@
-## 新功能
+## English 版本 · English version
 
-**全局模式**：首页新增「规则 / 全局」切换。
-- 规则（默认）：和以前一样，国内网站直连，其他网站按「网站」页的设置走。
-- 全局：所有网站（包括国内网站）都走首页选的默认地区，只有局域网直连。适合某个国内网站需要海外 IP、或者想确认所有流量都走代理的时候。
-- 连接中切换立即生效，不用重新连接。
+**中文**：软件现在有英文界面。默认跟随电脑的语言（英文系统自动显示英文），也可以在「设置 → 语言 · Language」里手动选择中文或 English。界面、错误提示、菜单栏小猫的菜单和导出的手机配置都会跟着切换。你已有的分组和网站设置不受影响。
 
-**软件内更新**：在「设置」最下方新增「软件更新」。软件会在后台定期检查，有新版本时这一项旁边会出现红点（不会弹窗打扰）。展开就能看到新版本号和更新内容，点「一键更新」自动下载、安装并重新打开。
-- 连接中时经过代理下载；更新完会自动重新连上。
-- 安装包有签名校验，被篡改的安装包不会被安装。
+**English**: Clash for Young now has an English interface. It follows your computer's language by default, and you can pick 中文 or English under Settings → 语言 · Language. The interface, error messages, the menu-bar cat's menu and the exported phone config all switch with it. Your existing groups and site settings are not affected.
 
-⚠️ 这一版需要**手动下载安装一次**（旧版本还没有更新功能）。从这一版之后的更新就都能在软件里一键完成了。
+其他：规则类型下拉框加宽，英文能完整显示。
+Also: the rule-type dropdown is wider so the English text fits.
