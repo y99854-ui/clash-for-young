@@ -4,3 +4,6 @@ src-tauri/gen/
 .DS_Store
 src-tauri/binaries/
 src-tauri/resources/
+
+# 更新签名私钥：只保存在自己电脑上，绝不能上传
+.signing/
