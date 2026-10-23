@@ -109,15 +109,15 @@ pub async fn api_get(cfg: &Api, path: &str) -> Result<Value, String> {
     let resp = with_auth(client.get(api_url(cfg, path)), cfg)
         .send()
         .await
-        .map_err(|e| format!("连不上控制 API {}：{e}", cfg.controller))?;
+        .map_err(|e| tr!("连不上控制 API {}：{e}", "Can't reach the control API {}: {e}", cfg.controller))?;
     let status = resp.status();
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if status == reqwest::StatusCode::UNAUTHORIZED {
-        return Err("控制 API 拒绝访问：密钥（secret）不对".into());
+        return Err(tr!("控制 API 拒绝访问：密钥（secret）不对", "The control API refused access: wrong secret"));
     }
     if !status.is_success() {
         let msg = body.get("message").and_then(|m| m.as_str()).unwrap_or("");
-        return Err(format!("控制 API 返回 {status} {msg}"));
+        return Err(tr!("控制 API 返回 {status} {msg}", "The control API returned {status} {msg}"));
     }
     Ok(body)
 }
@@ -179,7 +179,7 @@ async fn query_exit_ip(cfg: &Api) -> Result<(ExitIp, Vec<String>), String> {
         .header("Accept", "application/json")
         .send()
         .await
-        .map_err(|e| format!("查询出口 IP 失败：{e}"))?;
+        .map_err(|e| tr!("查询出口 IP 失败：{e}", "Exit IP lookup failed: {e}"))?;
     // 先在连接还活着的时候查链路，再读响应体
     let via_chain = find_connection(cfg, host, &HashSet::new())
         .await
@@ -190,7 +190,7 @@ async fn query_exit_ip(cfg: &Api) -> Result<(ExitIp, Vec<String>), String> {
     let body: Value = resp
         .json()
         .await
-        .map_err(|e| format!("出口 IP 响应无法解析：{e}"))?;
+        .map_err(|e| tr!("出口 IP 响应无法解析：{e}", "Couldn't read the exit IP response: {e}"))?;
     let location = [str_of(&body, "country"), str_of(&body, "region"), str_of(&body, "city")]
         .into_iter()
         .filter(|s| !s.is_empty())
@@ -227,22 +227,22 @@ async fn node_delay(cfg: &Api, node: &str, url: &str) -> Result<u64, String> {
     let v = api_get(cfg, &path).await?;
     v.get("delay")
         .and_then(|d| d.as_u64())
-        .ok_or_else(|| "延迟测试没有返回结果".into())
+        .ok_or_else(|| tr!("延迟测试没有返回结果", "The latency test returned no result"))
 }
 
 fn normalize_url(input: &str) -> Result<url::Url, String> {
     let s = input.trim();
     if s.is_empty() {
-        return Err("请输入网址".into());
+        return Err(tr!("请输入网址", "Enter a URL"));
     }
     let with_scheme = if s.contains("://") {
         s.to_string()
     } else {
         format!("https://{s}")
     };
-    let u = url::Url::parse(&with_scheme).map_err(|e| format!("网址格式不对：{e}"))?;
+    let u = url::Url::parse(&with_scheme).map_err(|e| tr!("网址格式不对：{e}", "Invalid URL: {e}"))?;
     if u.host_str().is_none() {
-        return Err("网址里没有域名".into());
+        return Err(tr!("网址里没有域名", "The URL has no domain"));
     }
     Ok(u)
 }
@@ -295,14 +295,15 @@ pub async fn inspect(cfg: Api, url: String, full: bool) -> Result<CheckResult, S
         Ok(r) => Some(r.status().as_u16()),
         Err(e) => {
             let reason = if e.is_timeout() {
-                "超时".to_string()
+                tr!("超时", "timed out")
             } else if e.is_connect() {
-                "连接失败".to_string()
+                tr!("连接失败", "connection failed")
             } else {
                 e.to_string()
             };
-            warnings.push(format!(
-                "网站没有正常响应（{reason}）。分流信息仍然有效：这只说明经该节点访问这个网站有问题，或网站拒绝了非浏览器的请求。"
+            warnings.push(tr!(
+                "网站没有正常响应（{reason}）。分流信息仍然有效：这只说明经该节点访问这个网站有问题，或网站拒绝了非浏览器的请求。",
+                "The site didn't respond normally ({reason}). The routing info is still valid: it only means this site had trouble through this node, or the site refuses non-browser requests."
             ));
             None
         }
@@ -310,8 +311,9 @@ pub async fn inspect(cfg: Api, url: String, full: bool) -> Result<CheckResult, S
     if let Ok(r) = &resp {
         let code = r.status().as_u16();
         if code == 403 || code == 429 {
-            warnings.push(format!(
-                "网站返回 HTTP {code}：通常是网站拒绝了自动化请求或该节点 IP，分流信息仍然有效；浏览器里实际能否打开以浏览器为准。"
+            warnings.push(tr!(
+                "网站返回 HTTP {code}：通常是网站拒绝了自动化请求或该节点 IP，分流信息仍然有效；浏览器里实际能否打开以浏览器为准。",
+                "The site returned HTTP {code}: it usually rejects automated requests or this node's IP. The routing info is still valid; whether it opens in your browser is what counts."
             ));
         }
     }
@@ -321,14 +323,16 @@ pub async fn inspect(cfg: Api, url: String, full: bool) -> Result<CheckResult, S
     if conn.is_none() && !existing.is_empty() {
         conn = find_connection(&cfg, &host, &HashSet::new()).await?;
         if conn.is_some() {
-            warnings.push("没抓到本次请求的连接，显示的是该网站已有连接（例如浏览器）的分流信息。".into());
+            warnings.push(tr!("没抓到本次请求的连接，显示的是该网站已有连接（例如浏览器）的分流信息。", "Couldn't catch this request's connection; showing routing for an existing connection to this site (e.g. from the browser)."));
         }
     }
 
     let Some(conn) = conn else {
-        return Err(format!(
+        return Err(tr!(
             "请求已发出，但在代理内核的活动连接里找不到 {host}。\n\
              请确认已连接，并且没有其他代理软件占用端口 {}。",
+            "The request was sent, but {host} isn't among the proxy core's active connections.\n\
+             Make sure you're connected and no other proxy app is using port {}.",
             cfg.mixed_port
         ));
     };
@@ -379,8 +383,9 @@ pub async fn inspect(cfg: Api, url: String, full: bool) -> Result<CheckResult, S
         Some(Ok((mut e, via_chain))) => {
             e.via_node = normalize_chains(via_chain, pmap).into_iter().next().unwrap_or_default();
             if !e.via_node.is_empty() && e.via_node != node {
-                warnings.push(format!(
+                warnings.push(tr!(
                     "出口 IP 查询走的是「{}」，不是「{node}」，所以下面的出口 IP 不代表本网址的出口。",
+                    "The exit IP lookup went through \"{}\", not \"{node}\", so the exit IP below isn't this URL's exit.",
                     e.via_node
                 ));
             }

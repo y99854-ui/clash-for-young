@@ -121,7 +121,7 @@ pub fn generate(input: &GenInput) -> GenOutput {
         Ok(Some(n)) if n != GROUP_DEFAULT => n,
         Ok(_) => GROUP_FASTEST.to_string(),
         Err(()) => {
-            fallbacks.push(format!("默认地区（{}）", display_target(&st.default_target)));
+            fallbacks.push(crate::tr!("默认地区（{}）", "Default region ({})", display_target(&st.default_target)));
             GROUP_FASTEST.to_string()
         }
     };
@@ -161,7 +161,7 @@ pub fn generate(input: &GenInput) -> GenOutput {
                 Ok(Some(t)) => rules.extend(rule_line(r, &t)),
                 Ok(None) => rules.extend(rule_line(r, GROUP_DEFAULT)),
                 Err(()) => {
-                    fallbacks.push(format!("自定义规则 {}", r.value));
+                    fallbacks.push(crate::tr!("自定义规则 {}", "Custom rule {}", r.value));
                     rules.extend(rule_line(r, GROUP_DEFAULT));
                 }
             }
@@ -306,11 +306,11 @@ pub fn generate(input: &GenInput) -> GenOutput {
 
 pub fn display_target(t: &str) -> String {
     match t {
-        "" => "自动".into(),
-        "fastest" => "自动（最快）".into(),
-        "default" => "默认地区".into(),
-        "DIRECT" => "直连".into(),
-        "REJECT" => "拦截".into(),
+        "" => crate::tr!("自动", "Auto"),
+        "fastest" => crate::tr!("自动（最快）", "Auto (fastest)"),
+        "default" => crate::tr!("默认地区", "Default region"),
+        "DIRECT" => crate::tr!("直连", "Direct"),
+        "REJECT" => crate::tr!("拦截", "Block"),
         _ => t.strip_prefix("region:").or_else(|| t.strip_prefix("node:")).unwrap_or(t).to_string(),
     }
 }

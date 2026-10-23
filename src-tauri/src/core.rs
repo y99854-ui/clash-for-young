@@ -98,15 +98,15 @@ impl Core {
         let over = self.launch_override.lock().unwrap().clone();
         let bin = over.or_else(|| self.binary.clone()).ok_or_else(|| {
             if cfg!(windows) {
-                "找不到代理内核文件 mihomo.exe。可能被杀毒软件删除了：请在杀毒软件里恢复它并加入白名单，或重新安装 Clash for Young。".to_string()
+                tr!("找不到代理内核文件 mihomo.exe。可能被杀毒软件删除了：请在杀毒软件里恢复它并加入白名单，或重新安装 Clash for Young。", "Can't find the proxy core file mihomo.exe. Your antivirus may have removed it: restore it and add it to the allow list, or reinstall Clash for Young.")
             } else {
-                "找不到代理内核文件 mihomo，请重新安装 Clash for Young。".to_string()
+                tr!("找不到代理内核文件 mihomo，请重新安装 Clash for Young。", "Can't find the proxy core file mihomo. Please reinstall Clash for Young.")
             }
         })?;
         // 上次软件被强制结束（崩溃、强制退出）时留下的内核还在运行：它占着端口和增强模式的路由，
         // 新内核的增强模式会启动失败、电脑断网。先把它关掉。
         self.kill_leftovers();
-        let log = File::create(self.log_path()).map_err(|e| format!("无法创建内核日志：{e}"))?;
+        let log = File::create(self.log_path()).map_err(|e| tr!("无法创建内核日志：{e}", "Can't create the core log: {e}"))?;
         let log2 = log.try_clone().map_err(|e| e.to_string())?;
         let mut cmd = Command::new(&bin);
         cmd.arg("-d")
@@ -120,9 +120,9 @@ impl Core {
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不弹黑色命令行窗口
         let child = cmd.spawn().map_err(|e| {
             if cfg!(windows) {
-                format!("无法启动代理内核：{e}。如果装了杀毒软件，请把 Clash for Young 的安装目录加入白名单。")
+                tr!("无法启动代理内核：{e}。如果装了杀毒软件，请把 Clash for Young 的安装目录加入白名单。", "Can't start the proxy core: {e}. If you have antivirus software, add the Clash for Young install folder to its allow list.")
             } else {
-                format!("无法启动代理内核：{e}")
+                tr!("无法启动代理内核：{e}", "Can't start the proxy core: {e}")
             }
         })?;
         let _ = std::fs::write(self.pid_path(), child.id().to_string());
@@ -191,7 +191,7 @@ impl Core {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        Err(format!("代理内核启动超时。{}", explain_log(&self.log_tail())))
+        Err(tr!("代理内核启动超时。{}", "The proxy core took too long to start. {}", explain_log(&self.log_tail())))
     }
 
     pub fn stop(&self) {
@@ -215,7 +215,7 @@ impl Core {
             if r.len() >= 5 {
                 self.want_running.store(false, Ordering::SeqCst);
                 *self.last_error.lock().unwrap() =
-                    Some(format!("代理内核反复退出，已停止重启。{}", explain_log(&self.log_tail())));
+                    Some(tr!("代理内核反复退出，已停止重启。{}", "The proxy core kept exiting, so it was not restarted again. {}", explain_log(&self.log_tail())));
                 continue;
             }
             r.push(Instant::now());
@@ -246,12 +246,12 @@ impl Core {
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("重新加载配置失败：{e}"))?;
+            .map_err(|e| tr!("重新加载配置失败：{e}", "Failed to reload the config: {e}"))?;
         if resp.status().is_success() {
             Ok(())
         } else {
             let text = resp.text().await.unwrap_or_default();
-            Err(format!("配置有误，内核拒绝加载：{text}"))
+            Err(tr!("配置有误，内核拒绝加载：{text}", "The core rejected the config: {text}"))
         }
     }
 }
@@ -332,16 +332,16 @@ fn graceful_stop(c: &mut Child) {
 pub fn explain_log(log: &str) -> String {
     let l = log.to_ascii_lowercase();
     if l.contains("address already in use") || l.contains("only one usage of each socket address") {
-        return "端口被占用：可能有其他代理软件（如 Clash Verge）正在运行。请先退出它，或在设置的「高级」里换一个端口。".into();
+        return tr!("端口被占用：可能有其他代理软件（如 Clash Verge）正在运行。请先退出它，或在设置的「高级」里换一个端口。", "The port is in use: another proxy app (such as Clash Verge) may be running. Quit it first, or pick another port under Settings → Advanced.");
     }
     if l.contains("geosite") || l.contains("geoip") || l.contains("mmdb") {
-        return "地理数据文件缺失或损坏，国内网站分流可能不对。请重新安装，或检查网络后重试。".into();
+        return tr!("地理数据文件缺失或损坏，国内网站分流可能不对。请重新安装，或检查网络后重试。", "The geo data files are missing or damaged, so China-site routing may be wrong. Reinstall, or check your network and try again.");
     }
     let last: Vec<&str> = log.lines().filter(|x| !x.trim().is_empty()).rev().take(3).collect();
     if last.is_empty() {
-        "代理内核意外退出。".into()
+        tr!("代理内核意外退出。", "The proxy core exited unexpectedly.")
     } else {
-        format!("代理内核报错：{}", last.into_iter().rev().collect::<Vec<_>>().join(" / "))
+        tr!("代理内核报错：{}", "Proxy core error: {}", last.into_iter().rev().collect::<Vec<_>>().join(" / "))
     }
 }
 
@@ -357,7 +357,7 @@ pub async fn select(api: &Api, group: &str, name: &str) -> Result<(), String> {
     if resp.status().is_success() {
         Ok(())
     } else {
-        Err(format!("切换失败：{}", resp.text().await.unwrap_or_default()))
+        Err(tr!("切换失败：{}", "Switching failed: {}", resp.text().await.unwrap_or_default()))
     }
 }
 

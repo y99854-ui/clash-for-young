@@ -49,7 +49,7 @@ pub fn generate(input: &MobileInput) -> Result<String, String> {
     let st = input.settings;
     let parsed = input.parsed;
     if parsed.proxies.is_empty() {
-        return Err("还没有可用的节点，先添加订阅。".into());
+        return Err(crate::tr!("还没有可用的节点，先添加订阅。", "No usable nodes yet. Add a subscription first."));
     }
     let defs: Vec<NodeGroup> = st.node_groups();
 
@@ -251,11 +251,60 @@ pub fn generate(input: &MobileInput) -> Result<String, String> {
     root.insert(s("proxies"), Value::Sequence(proxies));
     root.insert(s("proxy-groups"), Value::Sequence(groups));
     root.insert(s("rules"), seq(rules));
-    Ok(format!(
+    if crate::i18n::is_en() {
+        english_names(&mut root);
+    }
+    let header = crate::tr!(
         "# Clash for Young 导出的手机配置。里面有你的订阅链接，请不要发给别人。\n\
-         # 适用：Clash Mi（iPhone）、Clash Meta for Android、FlClash 等 mihomo 内核的软件。\n{}",
-        serde_yaml::to_string(&Value::Mapping(root)).map_err(|e| e.to_string())?
-    ))
+         # 适用：Clash Mi（iPhone）、Clash Meta for Android、FlClash 等 mihomo 内核的软件。\n",
+        "# Mobile config exported by Clash for Young. It contains your subscription link, so don't share it.\n\
+         # Works with mihomo-based apps such as Clash Mi (iPhone), Clash Meta for Android and FlClash.\n"
+    );
+    Ok(format!("{header}{}", serde_yaml::to_string(&Value::Mapping(root)).map_err(|e| e.to_string())?))
+}
+
+/// 英文界面导出时，把内部组名（默认地区、自动选择、其他、节点 · xx）换成英文，手机上显示英文
+fn english_names(root: &mut Mapping) {
+    let rename = |n: &str| -> Option<String> {
+        if n == GROUP_DEFAULT {
+            Some("Default region".into())
+        } else if n == GROUP_FASTEST {
+            Some("Auto (fastest)".into())
+        } else if n == OTHER_REGION {
+            Some("Other".into())
+        } else {
+            n.strip_prefix(NODE_PREFIX).map(|x| format!("Node · {x}"))
+        }
+    };
+    if let Some(Value::Sequence(groups)) = root.get_mut(s("proxy-groups")) {
+        for g in groups.iter_mut() {
+            let Value::Mapping(g) = g else { continue };
+            if let Some(n) = g.get(s("name")).and_then(|v| v.as_str()).and_then(|n| rename(n)) {
+                g.insert(s("name"), Value::from(n));
+            }
+            if let Some(Value::Sequence(members)) = g.get_mut(s("proxies")) {
+                for m in members.iter_mut() {
+                    if let Some(n) = m.as_str().and_then(|n| rename(n)) {
+                        *m = Value::from(n);
+                    }
+                }
+            }
+        }
+    }
+    // 规则的走向：最后一个字段（no-resolve 之前）
+    if let Some(Value::Sequence(rules)) = root.get_mut(s("rules")) {
+        for r in rules.iter_mut() {
+            let Some(text) = r.as_str() else { continue };
+            let mut parts: Vec<String> = text.split(',').map(String::from).collect();
+            let ti = if parts.last().map(|x| x == "no-resolve").unwrap_or(false) { parts.len() - 2 } else { parts.len() - 1 };
+            if ti >= 1 {
+                if let Some(n) = rename(&parts[ti]) {
+                    parts[ti] = n;
+                    *r = Value::from(parts.join(","));
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +324,33 @@ proxies:
   - {name: "US 家宽", type: ss, server: e.com, port: 1, cipher: aes-128-gcm, password: y}
   - {name: "Mars", type: ss, server: f.com, port: 1, cipher: aes-128-gcm, password: y}
 "#;
+
+    /// 英文界面导出：内部组名换成英文，规则走向跟着改。会改全局语言，单独运行：
+    /// cargo test english -- --ignored --test-threads=1
+    #[test]
+    #[ignore]
+    fn english_mobile_and_messages() {
+        crate::i18n::set_en_for_test(true);
+        let mut st = Settings::default();
+        st.subscriptions =
+            vec![Subscription { id: "s0".into(), name: "a".into(), url: "https://sub.example/abc".into(), ..Default::default() }];
+        st.groups = Some(subscription::default_groups());
+        st.site_choices.insert("discord".into(), "node:Japan 01".into());
+        let texts = vec![SUB_A.to_string()];
+        let parsed = subscription::parse_many(&texts, &st.node_groups());
+        let sites = crate::sites::catalog(&st);
+        let yaml = generate(&MobileInput { settings: &st, parsed: &parsed, sites: &sites, texts: &texts }).unwrap();
+        println!("{yaml}");
+        assert!(yaml.starts_with("# Mobile config exported by Clash for Young"));
+        let v: Value = serde_yaml::from_str(&yaml).unwrap();
+        let names: Vec<&str> = v["proxy-groups"].as_sequence().unwrap().iter().map(|g| g["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"Default region") && names.contains(&"Auto (fastest)") && names.contains(&"United States"));
+        assert!(!yaml.contains("默认地区") && !yaml.contains("自动选择") && !yaml.contains("节点 · "));
+        let rules: Vec<&str> = v["rules"].as_sequence().unwrap().iter().map(|r| r.as_str().unwrap()).collect();
+        assert_eq!(rules.last().copied(), Some("MATCH,Default region"));
+        assert_eq!(subscription::validate("<html>").unwrap_err(), "The subscription link returned a web page instead of a subscription. Check that the link is complete.");
+        crate::i18n::set_en_for_test(false);
+    }
 
     #[test]
     fn mobile_config() {

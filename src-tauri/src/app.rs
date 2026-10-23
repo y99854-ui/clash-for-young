@@ -43,7 +43,7 @@ fn sub_file(dir: &Path, id: &str) -> PathBuf {
 }
 
 fn host_of(url: &str) -> String {
-    url::Url::parse(url.trim()).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_else(|| "订阅".into())
+    url::Url::parse(url.trim()).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_else(|| tr!("订阅", "Subscription"))
 }
 
 /// 旧版只有一个订阅、没有编号，文件名是 subscription-0.yaml：补上编号、名字和节点数
@@ -57,7 +57,7 @@ fn migrate_subscriptions(dir: &Path, s: &mut Settings) {
             }
         }
         if sub.name.is_empty() {
-            sub.name = if sub.url.is_empty() { "导入的订阅".into() } else { host_of(&sub.url) };
+            sub.name = if sub.url.is_empty() { tr!("导入的订阅", "Imported") } else { host_of(&sub.url) };
         }
         if sub.node_count == 0 {
             if let Ok(t) = std::fs::read_to_string(sub_file(dir, &sub.id)) {
@@ -71,6 +71,13 @@ impl AppState {
     pub fn new(dir: PathBuf, geo_resource_dir: Option<PathBuf>) -> AppState {
         let _ = std::fs::create_dir_all(dir.join("core"));
         let mut settings = settings::load(&dir);
+        // 先定语言，再定默认分组的名字（“美国”或 “United States”）；之后名字固定，不随语言变，
+        // 免得网站页里选过的分组失效
+        #[cfg(not(test))]
+        crate::i18n::apply(&settings.language);
+        if settings.groups.is_none() {
+            settings.groups = Some(subscription::default_groups());
+        }
         migrate_subscriptions(&dir, &mut settings);
         let _ = settings::save(&dir, &settings);
         let core = Core::new(dir.join("core"));
@@ -159,8 +166,8 @@ impl AppState {
         });
         let path = self.core.config_path();
         let tmp = path.with_extension("yaml.tmp");
-        std::fs::write(&tmp, out.yaml).map_err(|e| format!("无法写入配置：{e}"))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("无法写入配置：{e}"))?;
+        std::fs::write(&tmp, out.yaml).map_err(|e| tr!("无法写入配置：{e}", "Can't write the config file: {e}"))?;
+        std::fs::rename(&tmp, &path).map_err(|e| tr!("无法写入配置：{e}", "Can't write the config file: {e}"))?;
         Ok(out.fallbacks)
     }
 
@@ -200,7 +207,7 @@ impl AppState {
             return Ok(());
         }
         if self.parsed.lock().unwrap().proxies.is_empty() {
-            return Err("还没有添加订阅。".into());
+            return Err(tr!("还没有添加订阅。", "No subscription added yet."));
         }
         self.ensure_ports()?;
         self.ensure_geo().await;
@@ -294,7 +301,7 @@ impl AppState {
             .find(|s| s.url == url)
             .map(|s| s.id.clone())
             .unwrap_or_else(|| format!("s{}", settings::now_ms()));
-        std::fs::write(sub_file(&self.dir, &id), &fetched.text).map_err(|e| format!("无法保存订阅：{e}"))?;
+        std::fs::write(sub_file(&self.dir, &id), &fetched.text).map_err(|e| tr!("无法保存订阅：{e}", "Can't save the subscription: {e}"))?;
         {
             let mut s = self.settings.lock().unwrap();
             match s.subscriptions.iter_mut().find(|x| x.id == id) {
@@ -320,11 +327,11 @@ impl AppState {
     fn import_file_sub(&self, file_name: &str, content: &str) -> Result<(), String> {
         let n = subscription::validate(content)?;
         let id = format!("s{}", settings::now_ms());
-        std::fs::write(sub_file(&self.dir, &id), content).map_err(|e| format!("无法保存订阅：{e}"))?;
+        std::fs::write(sub_file(&self.dir, &id), content).map_err(|e| tr!("无法保存订阅：{e}", "Can't save the subscription: {e}"))?;
         let name = file_name.rsplit_once('.').map(|(a, _)| a).unwrap_or(file_name).trim();
         self.settings.lock().unwrap().subscriptions.push(Subscription {
             id,
-            name: if name.is_empty() { "导入的订阅".into() } else { name.to_string() },
+            name: if name.is_empty() { tr!("导入的订阅", "Imported") } else { name.to_string() },
             url: String::new(),
             node_count: n,
             updated_at: settings::now_ms(),
@@ -406,11 +413,18 @@ pub struct StateView {
     pub global_mode: bool,
     /// 发现的新版本（没有为 None）
     pub update: Option<crate::updater::UpdateInfo>,
+    /// 语言设置：""（跟随系统）/ "zh" / "en"
+    pub language: String,
+    /// 实际使用的语言："zh" / "en"
+    pub lang: String,
 }
+
+/// 本地开发时的版本号（界面显示为“开发版”）
+pub const DEV_VERSION: &str = "dev";
 
 /// 版本号：GitHub Actions 打包时把发布标签放进环境变量 CFY_VERSION
 pub fn app_version() -> String {
-    option_env!("CFY_VERSION").filter(|v| !v.trim().is_empty()).unwrap_or("开发版").to_string()
+    option_env!("CFY_VERSION").filter(|v| !v.trim().is_empty()).unwrap_or(DEV_VERSION).to_string()
 }
 
 fn state_view(app: &AppState) -> StateView {
@@ -457,6 +471,8 @@ fn state_view(app: &AppState) -> StateView {
         version: app_version(),
         global_mode: st.global_mode,
         update: crate::updater::available(),
+        language: st.language.clone(),
+        lang: crate::i18n::current().to_string(),
     }
 }
 
@@ -502,7 +518,7 @@ pub async fn rename_subscription(app: S<'_>, id: String, name: String) -> Result
     let _g = app.op.lock().await;
     let name = name.trim().to_string();
     if name.is_empty() {
-        return Err("名字不能为空。".into());
+        return Err(tr!("名字不能为空。", "The name can't be empty."));
     }
     if let Some(s) = app.settings.lock().unwrap().subscriptions.iter_mut().find(|s| s.id == id) {
         s.name = name;
@@ -518,12 +534,12 @@ pub async fn refresh_subscription(app: S<'_>, id: Option<String>) -> Result<Stat
     let url_subs: Vec<Subscription> =
         app.settings.lock().unwrap().subscriptions.iter().filter(|s| !s.url.is_empty()).cloned().collect();
     if url_subs.is_empty() {
-        return Err("没有可以更新的订阅链接（从文件导入的订阅需要重新导入）。".into());
+        return Err(tr!("没有可以更新的订阅链接（从文件导入的订阅需要重新导入）。", "No subscription link to update (subscriptions imported from a file need to be imported again)."));
     }
     let failed = match id {
         Some(id) => {
             let Some(s) = url_subs.iter().find(|s| s.id == id) else {
-                return Err("找不到这个订阅。".into());
+                return Err(tr!("找不到这个订阅。", "Subscription not found."));
             };
             match app.fetch_url_sub(&s.url).await {
                 Ok(()) => vec![],
@@ -535,7 +551,7 @@ pub async fn refresh_subscription(app: S<'_>, id: Option<String>) -> Result<Stat
     app.after_subs_changed().await?;
     if !failed.is_empty() {
         let msg = failed.iter().map(|(n, e)| format!("「{n}」{e}")).collect::<Vec<_>>().join("\n");
-        return Err(format!("部分订阅更新失败（其他订阅已更新）：\n{msg}"));
+        return Err(tr!("部分订阅更新失败（其他订阅已更新）：\n{msg}", "Some subscriptions failed to update (the others were updated):\n{msg}"));
     }
     Ok(state_view(&app))
 }
@@ -578,6 +594,20 @@ pub async fn set_default_target(app: S<'_>, target: String) -> Result<StateView,
         }
         core::close_all_connections(&api).await;
     }
+    Ok(state_view(&app))
+}
+
+/// 切换界面语言：""（跟随系统）/ "zh" / "en"
+#[tauri::command]
+pub fn set_language(app: S, handle: tauri::AppHandle, language: String) -> Result<StateView, String> {
+    let language = match language.as_str() {
+        "zh" | "en" => language,
+        _ => String::new(),
+    };
+    crate::i18n::apply(&language);
+    app.settings.lock().unwrap().language = language;
+    app.save_settings()?;
+    crate::tray::relabel(&handle);
     Ok(state_view(&app))
 }
 
@@ -661,7 +691,7 @@ pub async fn save_site(app: S<'_>, site: SiteInput) -> Result<StateView, String>
         }
     }
     if domains.is_empty() {
-        return Err("请至少填写一个有效的域名，例如 example.com".into());
+        return Err(tr!("请至少填写一个有效的域名，例如 example.com", "Enter at least one valid domain, e.g. example.com"));
     }
     let mut all_domains = domains.clone();
     {
@@ -721,10 +751,10 @@ pub async fn set_custom_rules(app: S<'_>, rules: Vec<CustomRule>) -> Result<Stat
             continue;
         }
         if configgen::rule_line(&r, "DIRECT").is_none() {
-            return Err(format!("规则「{}」格式不对：不能包含逗号或空格。", r.value));
+            return Err(tr!("规则「{}」格式不对：不能包含逗号或空格。", "Rule \"{}\" is invalid: it can't contain commas or spaces.", r.value));
         }
         if r.kind == "ipcidr" && !looks_like_ip(&r.value) {
-            return Err(format!("「{}」不是有效的 IP 或 IP 段，例如 1.2.3.0/24", r.value));
+            return Err(tr!("「{}」不是有效的 IP 或 IP 段，例如 1.2.3.0/24", "\"{}\" is not a valid IP or IP range, e.g. 1.2.3.0/24", r.value));
         }
         cleaned.push(r);
     }
@@ -807,26 +837,26 @@ pub async fn save_group(app: S<'_>, group: GroupInput) -> Result<StateView, Stri
     let _g = app.op.lock().await;
     let name = group.name.trim().to_string();
     if name.is_empty() {
-        return Err("请填写分组名称。".into());
+        return Err(tr!("请填写分组名称。", "Enter a group name."));
     }
     if name.contains(',') || name.contains('\n') {
-        return Err("分组名称不能包含逗号或换行。".into());
+        return Err(tr!("分组名称不能包含逗号或换行。", "Group names can't contain commas or line breaks."));
     }
     if subscription::reserved_names().contains(&name) {
-        return Err(format!("「{name}」是软件保留的名字，请换一个。"));
+        return Err(tr!("「{name}」是软件保留的名字，请换一个。", "\"{name}\" is a reserved name. Please choose another."));
     }
     if app.parsed.lock().unwrap().node_names().contains(&name) {
-        return Err(format!("「{name}」和某个节点同名，请换一个名字。"));
+        return Err(tr!("「{name}」和某个节点同名，请换一个名字。", "\"{name}\" is the same as a node name. Please choose another."));
     }
     let keywords = split_keywords(&group.keywords);
     if keywords.is_empty() && group.nodes.is_empty() {
-        return Err("请填写至少一个关键词，或手动选择至少一个节点。".into());
+        return Err(tr!("请填写至少一个关键词，或手动选择至少一个节点。", "Enter at least one keyword, or pick at least one node."));
     }
     {
         let mut s = app.settings.lock().unwrap();
         let mut list = s.node_groups();
         if list.iter().any(|g| g.name == name && Some(&g.id) != group.id.as_ref()) {
-            return Err(format!("已经有名为「{name}」的分组了。"));
+            return Err(tr!("已经有名为「{name}」的分组了。", "A group named \"{name}\" already exists."));
         }
         let mut rename = None;
         match group.id.as_ref().and_then(|id| list.iter_mut().find(|g| &g.id == id)) {
@@ -899,7 +929,7 @@ pub async fn move_group(app: S<'_>, id: String, delta: i32) -> Result<StateView,
 #[tauri::command]
 pub async fn reset_groups(app: S<'_>) -> Result<StateView, String> {
     let _g = app.op.lock().await;
-    app.settings.lock().unwrap().groups = None;
+    app.settings.lock().unwrap().groups = Some(subscription::default_groups());
     app.save_settings()?;
     app.regroup();
     app.apply(&[]).await?;
@@ -916,7 +946,7 @@ pub async fn set_tun(app: S<'_>, enabled: bool) -> Result<StateView, String> {
     if enabled && !tun::privileged(app.core.binary()) {
         match tun::platform() {
             "mac" => {
-                let bin = app.core.binary().ok_or("找不到代理内核文件。")?.to_path_buf();
+                let bin = app.core.binary().ok_or_else(|| tr!("找不到代理内核文件。", "Can't find the proxy core file."))?.to_path_buf();
                 let stage = app.dir.join("mihomo-stage");
                 tauri::async_runtime::spawn_blocking(move || tun::grant(&bin, &stage))
                     .await
@@ -928,7 +958,7 @@ pub async fn set_tun(app: S<'_>, enabled: bool) -> Result<StateView, String> {
                 app.save_settings()?;
                 return Err("NEED_ADMIN".into());
             }
-            _ => return Err("这个系统暂不支持增强模式。".into()),
+            _ => return Err(tr!("这个系统暂不支持增强模式。", "Enhanced mode isn't supported on this system.")),
         }
     }
     app.settings.lock().unwrap().tun_enabled = enabled;
@@ -992,7 +1022,7 @@ pub async fn status(app: S<'_>, with_delay: bool) -> Result<Status, String> {
     }
     st.node = cur.clone();
     if cur == "DIRECT" {
-        st.region = "直连".into();
+        st.region = tr!("直连", "Direct");
     } else if let Some(r) = app.parsed.lock().unwrap().region_of(&cur) {
         st.region = r.name.clone();
         st.flag = r.flag.clone();
@@ -1012,7 +1042,7 @@ pub async fn status(app: S<'_>, with_delay: bool) -> Result<Status, String> {
 #[tauri::command]
 pub async fn node_delays(app: S<'_>) -> Result<Value, String> {
     if !app.core.is_running() {
-        return Err("请先连接。".into());
+        return Err(tr!("请先连接。", "Connect first."));
     }
     core::group_delay(&app.api(), configgen::GROUP_FASTEST).await
 }
@@ -1020,7 +1050,7 @@ pub async fn node_delays(app: S<'_>) -> Result<Value, String> {
 #[tauri::command]
 pub async fn check_url(app: S<'_>, url: String) -> Result<CheckResult, String> {
     if !app.core.is_running() {
-        return Err("请先在首页点「连接」。".into());
+        return Err(tr!("请先在首页点「连接」。", "Connect first on the Home page."));
     }
     check::inspect(app.api(), url, true).await
 }
@@ -1054,8 +1084,8 @@ pub fn export_mobile_config(app: S, handle: tauri::AppHandle) -> Result<String, 
         texts: &texts,
     })?;
     let dir = handle.path().download_dir().unwrap_or_else(|_| app.dir.clone());
-    let path = dir.join("Clash for Young 手机配置.yaml");
-    std::fs::write(&path, yaml).map_err(|e| format!("无法保存文件：{e}"))?;
+    let path = dir.join(tr!("Clash for Young 手机配置.yaml", "Clash for Young mobile config.yaml"));
+    std::fs::write(&path, yaml).map_err(|e| tr!("无法保存文件：{e}", "Can't save the file: {e}"))?;
     reveal(&path);
     Ok(path.to_string_lossy().to_string())
 }
@@ -1078,7 +1108,7 @@ fn reveal(path: &Path) {
 pub async fn set_ports(app: S<'_>, mixed_port: u16, controller_port: u16) -> Result<StateView, String> {
     let _g = app.op.lock().await;
     if mixed_port < 1024 || controller_port < 1024 || mixed_port == controller_port {
-        return Err("端口需在 1024–65535 之间，且两个端口不能相同。".into());
+        return Err(tr!("端口需在 1024–65535 之间，且两个端口不能相同。", "Ports must be between 1024 and 65535, and the two ports must differ."));
     }
     let was_connected = app.connected.load(Ordering::SeqCst);
     let was_running = app.core.is_running();

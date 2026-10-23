@@ -1,6 +1,8 @@
 // 发布版在 Windows 上不弹出命令行窗口
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[macro_use]
+mod i18n;
 mod app;
 mod check;
 mod configgen;
@@ -99,6 +101,7 @@ fn main() {
             app::set_global_mode,
             app::check_update,
             app::install_update,
+            app::set_language,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")
