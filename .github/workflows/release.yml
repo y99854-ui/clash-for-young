@@ -18,7 +18,25 @@ permissions:
   contents: write
 
 jobs:
+  # 先建好发布页，两个打包任务再往里放文件。
+  # 以前两个任务各自建发布页，同时完成时会撞车（already_exists），其中一个失败。
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 创建发布页
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "发布页 $TAG 已存在"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "Clash for Young $TAG" --notes-file release-notes.md
+          fi
+
   build:
+    needs: release
     strategy:
       fail-fast: false
       matrix:
