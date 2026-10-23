@@ -91,6 +91,10 @@ pub struct Settings {
     pub was_connected: bool,
     /// 增强模式（TUN）：接管所有程序的流量
     pub tun_enabled: bool,
+    /// 全局模式：所有网站（包括国内）都走默认地区，只有内网直连
+    pub global_mode: bool,
+    /// 自动更新前处于连接状态：更新后重新打开时自动连上
+    pub resume_after_update: bool,
 }
 
 impl Default for Settings {
@@ -108,6 +112,8 @@ impl Default for Settings {
             secret: String::new(),
             was_connected: false,
             tun_enabled: false,
+            global_mode: false,
+            resume_after_update: false,
         }
     }
 }

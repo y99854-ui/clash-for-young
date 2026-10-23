@@ -89,10 +89,14 @@ impl AppState {
 
     pub fn api(&self) -> Api {
         let s = self.settings.lock().unwrap();
-        Api { controller: format!("127.0.0.1:{}", s.controller_port), secret: s.secret.clone(), mixed_port: s.mixed_port }
+        Api {
+            controller: format!("127.0.0.1:{}", s.controller_port),
+            secret: s.secret.clone(),
+            mixed_port: s.mixed_port,
+        }
     }
 
-    fn save_settings(&self) -> Result<(), String> {
+    pub(crate) fn save_settings(&self) -> Result<(), String> {
         let s = self.settings.lock().unwrap().clone();
         settings::save(&self.dir, &s)
     }
@@ -146,7 +150,13 @@ impl AppState {
         let st = self.settings.lock().unwrap().clone();
         let parsed = self.parsed.lock().unwrap().clone();
         let sites = sites::catalog(&st);
-        let out = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: self.geo_ready(), tun: self.tun_active() });
+        let out = configgen::generate(&GenInput {
+            settings: &st,
+            parsed: &parsed,
+            sites: &sites,
+            geo_ready: self.geo_ready(),
+            tun: self.tun_active(),
+        });
         let path = self.core.config_path();
         let tmp = path.with_extension("yaml.tmp");
         std::fs::write(&tmp, out.yaml).map_err(|e| format!("无法写入配置：{e}"))?;
@@ -392,6 +402,10 @@ pub struct StateView {
     pub data_dir: String,
     /// 版本号（发版时由打包流程写入，如 v6712；本地开发是“开发版”）
     pub version: String,
+    /// 全局模式（所有网站都走默认地区）
+    pub global_mode: bool,
+    /// 发现的新版本（没有为 None）
+    pub update: Option<crate::updater::UpdateInfo>,
 }
 
 /// 版本号：GitHub Actions 打包时把发布标签放进环境变量 CFY_VERSION
@@ -403,7 +417,9 @@ fn state_view(app: &AppState) -> StateView {
     let st = app.settings.lock().unwrap().clone();
     let parsed = app.parsed.lock().unwrap().clone();
     let sites = sites::catalog(&st);
-    let fallbacks = configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false }).fallbacks;
+    let fallbacks =
+        configgen::generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false })
+            .fallbacks;
     let sites = sites
         .into_iter()
         .map(|s| SiteView { choice: st.site_choices.get(&s.id).cloned().unwrap_or_default(), site: s })
@@ -417,7 +433,8 @@ fn state_view(app: &AppState) -> StateView {
             .node_groups()
             .into_iter()
             .map(|g| {
-                let matched = parsed.all_groups.iter().find(|r| r.id == g.id).map(|r| r.nodes.clone()).unwrap_or_default();
+                let matched =
+                    parsed.all_groups.iter().find(|r| r.id == g.id).map(|r| r.nodes.clone()).unwrap_or_default();
                 GroupView { flag: subscription::flag_of_group(&g), def: g, matched }
             })
             .collect(),
@@ -438,6 +455,8 @@ fn state_view(app: &AppState) -> StateView {
         },
         data_dir: app.dir.to_string_lossy().to_string(),
         version: app_version(),
+        global_mode: st.global_mode,
+        update: crate::updater::available(),
     }
 }
 
@@ -503,7 +522,9 @@ pub async fn refresh_subscription(app: S<'_>, id: Option<String>) -> Result<Stat
     }
     let failed = match id {
         Some(id) => {
-            let Some(s) = url_subs.iter().find(|s| s.id == id) else { return Err("找不到这个订阅。".into()) };
+            let Some(s) = url_subs.iter().find(|s| s.id == id) else {
+                return Err("找不到这个订阅。".into());
+            };
             match app.fetch_url_sub(&s.url).await {
                 Ok(()) => vec![],
                 Err(e) => vec![(s.name.clone(), e)],
@@ -556,6 +577,34 @@ pub async fn set_default_target(app: S<'_>, target: String) -> Result<StateView,
             core::select(&api, GROUP_DEFAULT, &name).await?;
         }
         core::close_all_connections(&api).await;
+    }
+    Ok(state_view(&app))
+}
+
+/// 检查更新（设置页的按钮）
+#[tauri::command]
+pub async fn check_update(app: S<'_>, handle: tauri::AppHandle) -> Result<StateView, String> {
+    crate::updater::check(&handle).await?;
+    Ok(state_view(&app))
+}
+
+/// 下载安装新版本并重启。下载进度通过 get_state 里的 update 查看。
+#[tauri::command]
+pub async fn install_update(handle: tauri::AppHandle) -> Result<(), String> {
+    crate::updater::install(&handle).await
+}
+
+/// 切换 规则 / 全局 模式。连接中立即生效：重新加载配置并断开旧连接，让它们按新模式重连
+#[tauri::command]
+pub async fn set_global_mode(app: S<'_>, global: bool) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.settings.lock().unwrap().global_mode = global;
+    app.save_settings()?;
+    if app.core.is_running() {
+        app.apply(&[]).await?;
+        core::close_all_connections(&app.api()).await;
+    } else {
+        app.write_config()?;
     }
     Ok(state_view(&app))
 }
@@ -789,7 +838,12 @@ pub async fn save_group(app: S<'_>, group: GroupInput) -> Result<StateView, Stri
                 g.keywords = keywords;
                 g.nodes = group.nodes;
             }
-            None => list.push(NodeGroup { id: format!("g{}", settings::now_ms()), name: name.clone(), keywords, nodes: group.nodes }),
+            None => list.push(NodeGroup {
+                id: format!("g{}", settings::now_ms()),
+                name: name.clone(),
+                keywords,
+                nodes: group.nodes,
+            }),
         }
         s.groups = Some(list);
         if let Some(old) = rename {
@@ -922,7 +976,9 @@ pub async fn status(app: S<'_>, with_delay: bool) -> Result<Status, String> {
         return Ok(st);
     }
     let api = app.api();
-    let Ok(all) = check::api_get(&api, "/proxies").await else { return Ok(st) };
+    let Ok(all) = check::api_get(&api, "/proxies").await else {
+        return Ok(st);
+    };
     let pmap = &all["proxies"];
     st.selected = check::str_of(&pmap[GROUP_DEFAULT], "now");
     // 一路找到真正的节点
@@ -985,10 +1041,18 @@ pub fn export_mobile_config(app: S, handle: tauri::AppHandle) -> Result<String, 
     use tauri::Manager;
     let st = app.settings.lock().unwrap().clone();
     let parsed = app.parsed.lock().unwrap().clone();
-    let texts: Vec<String> =
-        st.subscriptions.iter().map(|x| std::fs::read_to_string(sub_file(&app.dir, &x.id)).unwrap_or_default()).collect();
+    let texts: Vec<String> = st
+        .subscriptions
+        .iter()
+        .map(|x| std::fs::read_to_string(sub_file(&app.dir, &x.id)).unwrap_or_default())
+        .collect();
     let sites = sites::catalog(&st);
-    let yaml = crate::mobile::generate(&crate::mobile::MobileInput { settings: &st, parsed: &parsed, sites: &sites, texts: &texts })?;
+    let yaml = crate::mobile::generate(&crate::mobile::MobileInput {
+        settings: &st,
+        parsed: &parsed,
+        sites: &sites,
+        texts: &texts,
+    })?;
     let dir = handle.path().download_dir().unwrap_or_else(|_| app.dir.clone());
     let path = dir.join("Clash for Young 手机配置.yaml");
     std::fs::write(&path, yaml).map_err(|e| format!("无法保存文件：{e}"))?;
@@ -1003,9 +1067,7 @@ fn reveal(path: &Path) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", path.display()))
-            .spawn();
+        let _ = std::process::Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     let _ = path;
@@ -1041,12 +1103,75 @@ pub async fn on_startup(app: &AppState) {
     // 上次被强制结束时留下的内核（会让增强模式断网）
     app.core.kill_leftovers();
     sysproxy_ctl::recover_on_startup(&app.dir, port);
+    // 刚自动更新完：更新前是连着的，就自动连上（平时打开软件不会自动连接）
+    let resume = std::mem::take(&mut app.settings.lock().unwrap().resume_after_update);
+    if resume {
+        let _ = app.save_settings();
+        let _g = app.op.lock().await;
+        if let Err(e) = app.connect().await {
+            *app.core.last_error.lock().unwrap() = Some(e);
+        }
+    }
 }
 
 #[cfg(test)]
 mod e2e {
     //! 需要真实 mihomo（CFY_MIHOMO）、本地订阅服务（CFY_SUB_URL）。运行：cargo test -- --ignored
     use super::*;
+
+    async fn live_rules(app: &AppState) -> Vec<String> {
+        let api = app.api();
+        let v: Value = reqwest::Client::new()
+            .get(format!("http://{}/rules", api.controller))
+            .bearer_auth(&api.secret)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        v["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| format!("{},{},{}", r["type"].as_str().unwrap(), r["payload"].as_str().unwrap(), r["proxy"].as_str().unwrap()))
+            .collect()
+    }
+
+    /// 运行中切换全局 / 规则，内核实际加载的规则跟着变（只需要 CFY_MIHOMO）
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn global_switch_live() {
+        let dir = std::env::temp_dir().join(format!("cfy-global-{}", settings::now_ms()));
+        let app = AppState::new(dir.clone(), None);
+        {
+            let mut s = app.settings.lock().unwrap();
+            s.mixed_port = 17999;
+            s.controller_port = 19198;
+            s.custom_rules.push(CustomRule { kind: "keyword".into(), value: "openai".into(), target: "DIRECT".into() });
+        }
+        app.import_file_sub("t.yaml", "proxies:\n  - {name: \"日本 01\", type: socks5, server: 127.0.0.1, port: 1080}\n")
+            .unwrap();
+        app.reparse();
+        app.start_core().await.unwrap();
+
+        let rules = live_rules(&app).await;
+        assert!(rules.iter().any(|r| r.contains("openai")), "{rules:?}");
+
+        app.settings.lock().unwrap().global_mode = true;
+        app.apply(&[]).await.unwrap();
+        let rules = live_rules(&app).await;
+        println!("全局模式下内核的规则：{rules:#?}");
+        assert!(!rules.iter().any(|r| r.contains("openai")));
+        assert!(rules.last().unwrap().starts_with("Match"));
+        assert!(rules.last().unwrap().ends_with(GROUP_DEFAULT));
+
+        app.settings.lock().unwrap().global_mode = false;
+        app.apply(&[]).await.unwrap();
+        assert!(live_rules(&app).await.iter().any(|r| r.contains("openai")));
+        app.core.stop();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
@@ -1105,8 +1230,11 @@ mod e2e {
 
         // 默认地区切到香港
         app.settings.lock().unwrap().default_target = "region:香港".into();
-        app.settings.lock().unwrap().custom_rules
-            .push(CustomRule { kind: "keyword".into(), value: "example".into(), target: "default".into() });
+        app.settings.lock().unwrap().custom_rules.push(CustomRule {
+            kind: "keyword".into(),
+            value: "example".into(),
+            target: "default".into(),
+        });
         app.apply(&[]).await.unwrap();
         core::select(&app.api(), GROUP_DEFAULT, "香港").await.unwrap();
         let r = check::inspect(app.api(), "http://example.org:18081".into(), false).await.unwrap();

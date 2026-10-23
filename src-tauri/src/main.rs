@@ -12,6 +12,7 @@ mod subscription;
 mod sysproxy_ctl;
 mod tray;
 mod tun;
+mod updater;
 
 use app::AppState;
 use std::time::Duration;
@@ -28,11 +29,13 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_window(app);
         }))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|a| {
             let dir = a.path().app_data_dir().expect("无法确定数据目录");
             let geo = a.path().resource_dir().ok().map(|r| r.join("geo"));
             a.manage(AppState::new(dir, geo));
             tray::setup(a.handle())?;
+            updater::spawn_background(a.handle().clone());
             let handle = a.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let st = handle.state::<AppState>();
@@ -41,9 +44,9 @@ fn main() {
                 loop {
                     let due = {
                         let s = st.settings.lock().unwrap();
-                        s.subscriptions
-                            .iter()
-                            .any(|x| !x.url.is_empty() && settings::now_ms() - x.updated_at > AUTO_UPDATE.as_millis() as i64)
+                        s.subscriptions.iter().any(|x| {
+                            !x.url.is_empty() && settings::now_ms() - x.updated_at > AUTO_UPDATE.as_millis() as i64
+                        })
                     };
                     if due {
                         app::auto_refresh(&st).await;
@@ -93,6 +96,9 @@ fn main() {
             app::set_tun,
             app::relaunch_as_admin,
             app::export_mobile_config,
+            app::set_global_mode,
+            app::check_update,
+            app::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")

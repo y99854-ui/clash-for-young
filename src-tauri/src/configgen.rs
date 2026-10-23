@@ -10,15 +10,8 @@ pub const GROUP_FASTEST: &str = "自动选择";
 const TEST_URL: &str = "https://www.gstatic.com/generate_204";
 
 /// 内网地址：始终直连
-const PRIVATE_CIDRS: &[&str] = &[
-    "127.0.0.0/8",
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    "100.64.0.0/10",
-    "169.254.0.0/16",
-    "224.0.0.0/4",
-];
+const PRIVATE_CIDRS: &[&str] =
+    &["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16", "224.0.0.0/4"];
 
 pub struct GenInput<'a> {
     pub settings: &'a Settings,
@@ -100,7 +93,13 @@ pub fn rule_line(rule: &CustomRule, target_name: &str) -> Option<String> {
         "keyword" => format!("DOMAIN-KEYWORD,{v},{target_name}"),
         "ipcidr" => {
             let kind = if v.contains(':') { "IP-CIDR6" } else { "IP-CIDR" };
-            let v = if v.contains('/') { v } else if v.contains(':') { format!("{v}/128") } else { format!("{v}/32") };
+            let v = if v.contains('/') {
+                v
+            } else if v.contains(':') {
+                format!("{v}/128")
+            } else {
+                format!("{v}/32")
+            };
             format!("{kind},{v},{target_name},no-resolve")
         }
         _ => format!("DOMAIN-SUFFIX,{v},{target_name}"),
@@ -132,11 +131,7 @@ pub fn generate(input: &GenInput) -> GenOutput {
     default_members.extend(all_nodes.iter().cloned());
     default_members.retain(|x| x != &default_name);
     default_members.insert(0, default_name);
-    groups.push(map(vec![
-        ("name", s(GROUP_DEFAULT)),
-        ("type", s("select")),
-        ("proxies", seq(default_members)),
-    ]));
+    groups.push(map(vec![("name", s(GROUP_DEFAULT)), ("type", s("select")), ("proxies", seq(default_members))]));
 
     let url_test = |name: &str, nodes: Vec<String>| {
         map(vec![
@@ -156,38 +151,44 @@ pub fn generate(input: &GenInput) -> GenOutput {
 
     // ── 规则 ──
     let mut rules: Vec<String> = vec![];
+    let global = st.global_mode;
 
-    // 1. 自定义规则（用户排好的顺序）
-    for r in &st.custom_rules {
-        match resolve_target(&r.target, parsed) {
-            Ok(Some(t)) => rules.extend(rule_line(r, &t)),
-            Ok(None) => rules.extend(rule_line(r, GROUP_DEFAULT)),
-            Err(()) => {
-                fallbacks.push(format!("自定义规则 {}", r.value));
-                rules.extend(rule_line(r, GROUP_DEFAULT));
+    // 全局模式：跳过自定义规则、网站选择和国内直连，除内网外全部走默认地区
+    if !global {
+        // 1. 自定义规则（用户排好的顺序）
+        for r in &st.custom_rules {
+            match resolve_target(&r.target, parsed) {
+                Ok(Some(t)) => rules.extend(rule_line(r, &t)),
+                Ok(None) => rules.extend(rule_line(r, GROUP_DEFAULT)),
+                Err(()) => {
+                    fallbacks.push(format!("自定义规则 {}", r.value));
+                    rules.extend(rule_line(r, GROUP_DEFAULT));
+                }
+            }
+        }
+
+        // 2. 网站页的选择
+        for site in input.sites {
+            let Some(choice) = st.site_choices.get(&site.id) else {
+                continue;
+            };
+            let t = match resolve_target(choice, parsed) {
+                Ok(Some(t)) => t,
+                Ok(None) => continue,
+                Err(()) => {
+                    fallbacks.push(site.name.clone());
+                    GROUP_DEFAULT.to_string()
+                }
+            };
+            for d in &site.domains {
+                if let Some(d) = clean_value(d) {
+                    rules.push(format!("DOMAIN-SUFFIX,{d},{t}"));
+                }
             }
         }
     }
 
-    // 2. 网站页的选择
-    for site in input.sites {
-        let Some(choice) = st.site_choices.get(&site.id) else { continue };
-        let t = match resolve_target(choice, parsed) {
-            Ok(Some(t)) => t,
-            Ok(None) => continue,
-            Err(()) => {
-                fallbacks.push(site.name.clone());
-                GROUP_DEFAULT.to_string()
-            }
-        };
-        for d in &site.domains {
-            if let Some(d) = clean_value(d) {
-                rules.push(format!("DOMAIN-SUFFIX,{d},{t}"));
-            }
-        }
-    }
-
-    // 3. 内置：内网和国内直连，其余走默认地区
+    // 3. 内置：内网直连；规则模式下国内也直连，其余走默认地区
     rules.push("DOMAIN-SUFFIX,local,DIRECT".into());
     rules.push("DOMAIN-SUFFIX,localhost,DIRECT".into());
     for c in PRIVATE_CIDRS {
@@ -195,7 +196,7 @@ pub fn generate(input: &GenInput) -> GenOutput {
     }
     rules.push("IP-CIDR6,::1/128,DIRECT,no-resolve".into());
     rules.push("IP-CIDR6,fe80::/10,DIRECT,no-resolve".into());
-    if input.geo_ready {
+    if input.geo_ready && !global {
         rules.push("GEOSITE,cn,DIRECT".into());
         // no-resolve：只对直接用 IP 的连接判断，不为了判断规则去本地解析外网域名
         // （本地解析会把访问的网站暴露给本地 DNS，也会拖慢每个新连接）
@@ -214,7 +215,8 @@ pub fn generate(input: &GenInput) -> GenOutput {
     let mut policy = Mapping::new();
     policy.insert(s("+.lan"), Value::from("system"));
     policy.insert(s("+.local"), Value::from("system"));
-    if input.geo_ready {
+    // 全局模式下国内网站也经节点访问，用国外 DNS 解析才能拿到离节点近的地址
+    if input.geo_ready && !global {
         policy.insert(s("geosite:cn,private"), seq(cn_dns.clone()));
     }
     let dns = map(vec![
@@ -321,7 +323,12 @@ mod tests {
     fn sample() -> Parsed {
         let mut defs = default_groups();
         for (id, name) in [("hk", "香港"), ("jp", "日本")] {
-            defs.push(crate::settings::NodeGroup { id: id.into(), name: name.into(), keywords: vec![name.into()], nodes: vec![] });
+            defs.push(crate::settings::NodeGroup {
+                id: id.into(),
+                name: name.into(),
+                keywords: vec![name.into()],
+                nodes: vec![],
+            });
         }
         defs.retain(|g| g.id != "us" && g.id != "tw");
         parse(
@@ -394,6 +401,32 @@ proxies:
         assert!(!out.yaml.contains("doh.pub"));
         assert_eq!(v["find-process-mode"].as_str(), Some("off"));
         assert!(v["proxies"].as_sequence().unwrap().iter().all(|p| p["udp"].as_bool() == Some(true)));
+    }
+
+    #[test]
+    fn global_mode_rules() {
+        let parsed = sample();
+        let mut st = Settings::default();
+        st.global_mode = true;
+        st.site_choices.insert("discord".into(), "region:日本".into());
+        st.custom_rules.push(CustomRule { kind: "keyword".into(), value: "openai".into(), target: "DIRECT".into() });
+        let sites = crate::sites::catalog(&st);
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: true });
+        let v: Value = serde_yaml::from_str(&out.yaml).unwrap();
+        let rules: Vec<String> =
+            v["rules"].as_sequence().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        // 内网仍直连，QUIC 照样拦，其余全部走默认地区
+        assert!(rules.contains(&"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve".to_string()));
+        assert!(rules.contains(&"AND,((NETWORK,UDP),(DST-PORT,443)),REJECT".to_string()));
+        assert_eq!(rules.last().unwrap(), "MATCH,默认地区");
+        assert!(!rules
+            .iter()
+            .any(|r| r.contains("GEOSITE") || r.contains("GEOIP") || r.contains("openai") || r.contains("discord")));
+        assert!(v["dns"]["nameserver-policy"]["geosite:cn,private"].is_null());
+        assert_eq!(v["mode"].as_str(), Some("rule"));
+        if let Ok(p) = std::env::var("CFY_DUMP_GLOBAL") {
+            std::fs::write(p, &out.yaml).unwrap();
+        }
     }
 
     #[test]
