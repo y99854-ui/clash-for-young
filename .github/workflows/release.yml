@@ -53,6 +53,16 @@ jobs:
 
       - run: npm ci
 
+      # 软件内自动更新按版本号比较新旧：发布标签 v6714 写成 0.0.6714
+      # （Windows 安装包要求主版本号 ≤ 255，所以数字放在最后一位）
+      - name: 写入版本号
+        shell: bash
+        run: |
+          N="${TAG#v}"
+          if ! [[ "$N" =~ ^[0-9]+$ ]]; then echo "发布标签必须是 v 加数字，如 v6714（现在是 $TAG）"; exit 1; fi
+          node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='0.0.$N';require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+          grep '"version"' src-tauri/tauri.conf.json
+
       # 由小猫原图生成各尺寸的应用图标（icns / ico / png）
       - run: npx tauri icon src-tauri/icons/app-icon.png
 
@@ -79,6 +89,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 给更新包签名的私钥（仓库 Settings → Secrets 里的 TAURI_SIGNING_PRIVATE_KEY）。
+          # 软件里内置对应的公钥，只安装用这把私钥签过的更新包。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ env.TAG }}
           releaseName: Clash for Young ${{ env.TAG }}
@@ -86,3 +100,6 @@ jobs:
           releaseDraft: false
           args: ${{ matrix.args }}
           assetNamePattern: clash-for-young_${{ env.TAG }}_[arch][setup][ext]
+          # 生成 latest.json（软件检查更新时读它）；Windows 用 setup.exe 那种安装包更新
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
