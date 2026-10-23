@@ -93,6 +93,7 @@ function render() {
   if (!S.subscriptions.length) { show("welcome"); return; }
   if (view === "welcome") show("home");
   $("appVersion").textContent = S.version || "";
+  renderUpdate();
   renderHome();
   renderSites();
   renderSettings();
@@ -105,6 +106,14 @@ function renderHome() {
   if (!$("catImg").src.endsWith(cat)) { $("catImg").src = cat; $("brandCat").src = cat; }
   $("connText").textContent = on ? "已连接" : "未连接";
   $("tunTag").classList.toggle("hidden", !(on && S.tun.enabled && S.tun.privileged));
+  $("globalTag").classList.toggle("hidden", !(on && S.globalMode));
+  document.querySelectorAll("#modeSeg button").forEach((b) => b.classList.toggle("active", (b.dataset.global === "1") === S.globalMode));
+  $("modeHint").textContent = S.globalMode
+    ? "全局：所有网站（包括国内网站）都走下面的默认地区。"
+    : "规则：国内网站直连，其他网站按「网站」页的设置走。";
+  $("defaultHint").textContent = S.globalMode
+    ? "全局模式下所有网站都走这里（局域网除外）。分组可以在「设置 → 节点分组」里修改。"
+    : "没有单独设置的网站都走这里。国内网站始终直连。分组可以在「设置 → 节点分组」里修改。";
   let now = "";
   if (on && status) {
     if (status.node === "DIRECT") now = "全部直连";
@@ -157,6 +166,7 @@ function renderSubs() {
 
 const CAT_ORDER = ["AI", "视频", "社交", "常用", "科研", "国内", "我添加的"];
 function renderSites() {
+  $("globalWarn").classList.toggle("hidden", !S.globalMode);
   const fb = S.fallbacks || [];
   $("fallbackWarn").classList.toggle("hidden", !fb.length);
   $("fallbackWarn").textContent = fb.length ? `订阅里已经没有这些选择对应的节点或地区，暂时改走默认地区：${fb.join("、")}` : "";
@@ -704,6 +714,66 @@ $("groupsList").addEventListener("click", async (e) => {
 $("resetGroupsBtn").addEventListener("click", async () => {
   if (!(await askConfirm("恢复成默认的「美国」「台湾」两个分组？你新建的分组会被删除。"))) return;
   try { S = await call("reset_groups"); render(); toast("已恢复默认分组"); } catch (_) {}
+});
+
+// ───────── 规则 / 全局 ─────────
+$("modeSeg").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const global = b.dataset.global === "1";
+  if (global === S.globalMode) return;
+  try {
+    S = await call("set_global_mode", { global });
+    render();
+    toast(global ? "已切换到全局模式" : "已切换到规则模式");
+  } catch (_) {}
+});
+
+// ───────── 更新 ─────────
+let updateTimer = null;
+function renderUpdate() {
+  const u = S.update;
+  const dev = S.version === "开发版";
+  $("updateDot").classList.toggle("hidden", !u);
+  $("updateSummary").textContent = u ? `有新版本 ${u.version}` : dev ? "开发版" : `当前 ${S.version}`;
+  let text;
+  if (!u) text = dev ? "本地开发版不检查更新。" : `现在是 ${S.version}。软件会定期在后台检查新版本，有更新时这里会出现红点。`;
+  else if (u.installing) {
+    text = u.total && u.downloaded >= u.total ? "正在安装，装好后会自动重新打开…"
+      : u.total ? `正在下载 ${fmtBytes(u.downloaded)} / ${fmtBytes(u.total)}…` : `正在下载 ${fmtBytes(u.downloaded)}…`;
+  } else if (u.error) text = u.error;
+  else text = `新版本 ${u.version} 可以更新（现在是 ${S.version}）。更新时会短暂断开，软件重新打开后自动连上。`;
+  $("updateText").textContent = text;
+  $("updateText").classList.toggle("muted", !(u && u.error));
+  $("updateBtn").classList.toggle("hidden", !u);
+  $("updateBtn").disabled = !!(u && u.installing);
+  $("updateBtn").textContent = u && u.installing ? "更新中…" : u && u.error ? "重试" : "一键更新";
+  $("checkUpdateBtn").disabled = dev || !!(u && u.installing);
+  $("updateProgress").classList.toggle("hidden", !(u && u.installing));
+  $("updateProgressBar").style.width = u && u.total ? `${Math.min(100, (u.downloaded / u.total) * 100)}%` : "5%";
+  $("updateNotesBox").classList.toggle("hidden", !(u && u.notes));
+  $("updateNotes").textContent = (u && u.notes) || "";
+  // 下载中每半秒刷新进度
+  if (u && u.installing && !updateTimer) updateTimer = setInterval(refreshState, 500);
+  if (!(u && u.installing) && updateTimer) { clearInterval(updateTimer); updateTimer = null; }
+}
+$("updateBtn").addEventListener("click", async () => {
+  const u = S.update;
+  if (!u) return;
+  S.update = { ...u, installing: true, downloaded: 0, total: 0, error: null };
+  renderUpdate();
+  try {
+    await call("install_update", {}, { quiet: true });
+  } catch (_) {}
+  await refreshState(); // 失败时显示错误；成功时软件已重启，不会走到这里
+});
+$("checkUpdateBtn").addEventListener("click", async () => {
+  toast("正在检查更新…");
+  try {
+    S = await call("check_update");
+    render();
+    toast(S.update ? `发现新版本 ${S.update.version}` : "已经是最新版本");
+  } catch (_) {}
 });
 
 // ───────── 启动 ─────────

@@ -40,14 +40,27 @@
         <img id="catImg" src="assets/cat-sleep.png" alt="" />
       </button>
       <div class="hero-text">
-        <div class="conn-line"><span id="connText" class="conn-text">未连接</span><span id="tunTag" class="tun-tag hidden">增强模式</span></div>
+        <div class="conn-line"><span id="connText" class="conn-text">未连接</span><span id="tunTag" class="tun-tag hidden">增强模式</span><span id="globalTag" class="tun-tag hidden">全局</span></div>
         <div id="nowText" class="muted"></div>
       </div>
     </section>
 
     <section class="card">
+      <div class="sub-line">
+        <div>
+          <div class="field-title">模式</div>
+          <div id="modeHint" class="muted small"></div>
+        </div>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-global="0">规则</button>
+          <button type="button" data-global="1">全局</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
       <div class="field-title">默认地区</div>
-      <p class="muted small">没有单独设置的网站都走这里。国内网站始终直连。分组可以在「设置 → 节点分组」里修改。</p>
+      <p id="defaultHint" class="muted small"></p>
       <select id="defaultSelect"></select>
     </section>
 
@@ -65,6 +78,7 @@
 
   <!-- ───────── 网站 ───────── -->
   <main id="view-sites" class="hidden">
+    <div id="globalWarn" class="warn hidden">现在是<b>全局模式</b>：所有网站都走首页的默认地区，这里的设置暂时不生效。切回「规则」模式后恢复。</div>
     <div id="fallbackWarn" class="warn hidden"></div>
     <p class="muted small">给每个网站选择走向。<b>自动</b> = 跟随首页的默认地区（国内网站直连）。改完立即生效，可以点「检查」确认。</p>
     <div id="siteGroups"></div>
@@ -174,6 +188,18 @@
       </div>
       <pre id="logBox" class="logbox hidden"></pre>
       <p id="dataDir" class="muted small"></p>
+    </details>
+
+    <details class="card fold" id="updateBox">
+      <summary><span class="fold-title">软件更新<span id="updateDot" class="red-dot hidden"></span></span><span id="updateSummary" class="muted small"></span></summary>
+      <p id="updateText" class="muted small"></p>
+      <div id="updateProgress" class="usage hidden"><div id="updateProgressBar"></div></div>
+      <details id="updateNotesBox" class="update-notes hidden"><summary class="small">更新内容</summary><pre id="updateNotes"></pre></details>
+      <div class="row actions">
+        <button type="button" id="checkUpdateBtn" class="ghost">检查更新</button>
+        <span class="spacer"></span>
+        <button type="button" id="updateBtn" class="hidden">一键更新</button>
+      </div>
     </details>
 
     <p class="muted small about">Clash for Young <span id="appVersion"></span> · 基于 mihomo 内核 · GPL-3.0</p>
