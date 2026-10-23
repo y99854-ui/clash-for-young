@@ -51,19 +51,6 @@
     </section>
 
     <section class="card">
-      <div class="sub-line">
-        <div>
-          <div class="field-title" data-en="Mode">模式</div>
-          <div id="modeHint" class="muted small"></div>
-        </div>
-        <div class="seg" id="modeSeg">
-          <button type="button" data-global="0" data-en="Rule">规则</button>
-          <button type="button" data-global="1" data-en="Global">全局</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
       <div class="field-title" data-en="Default region">默认地区</div>
       <p id="defaultHint" class="muted small"></p>
       <select id="defaultSelect"></select>
@@ -83,7 +70,19 @@
 
   <!-- ───────── 网站 ───────── -->
   <main id="view-sites" class="hidden">
-    <div id="globalWarn" class="warn hidden" data-en="You're in &lt;b&gt;Global mode&lt;/b&gt;: every site uses the default region on the Home page, so the settings here are paused. They come back when you switch to Rule mode.">现在是<b>全局模式</b>：所有网站都走首页的默认地区，这里的设置暂时不生效。切回「规则」模式后恢复。</div>
+    <section class="card">
+      <div class="sub-line">
+        <div>
+          <div class="field-title" data-en="Mode">模式</div>
+          <div id="modeHint" class="muted small"></div>
+        </div>
+        <div class="seg" id="modeSeg">
+          <button type="button" data-global="0" data-en="Rule">规则</button>
+          <button type="button" data-global="1" data-en="Global">全局</button>
+        </div>
+      </div>
+    </section>
+
     <div id="fallbackWarn" class="warn hidden"></div>
     <p class="muted small" data-en="Choose a route for each site. &lt;b&gt;Auto&lt;/b&gt; = follow the default region on the Home page (China sites go direct). Changes apply right away; click “Check” to confirm.">给每个网站选择走向。<b>自动</b> = 跟随首页的默认地区（国内网站直连）。改完立即生效，可以点「检查」确认。</p>
     <div id="siteGroups"></div>

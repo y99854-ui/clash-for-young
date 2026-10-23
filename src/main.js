@@ -139,8 +139,8 @@ function renderHome() {
   $("globalTag").classList.toggle("hidden", !(on && S.globalMode));
   document.querySelectorAll("#modeSeg button").forEach((b) => b.classList.toggle("active", (b.dataset.global === "1") === S.globalMode));
   $("modeHint").textContent = S.globalMode
-    ? L("全局：所有网站（包括国内网站）都走下面的默认地区。", "Global: every site, including China sites, uses the default region below.")
-    : L("规则：国内网站直连，其他网站按「网站」页的设置走。", "Rule: China sites go direct; other sites follow the Sites page.");
+    ? L("全局：所有网站（包括国内网站）都走首页的默认地区，下面的设置暂时不生效。", "Global: every site, including China sites, uses the default region on the Home page. The settings below are paused.")
+    : L("规则：国内网站直连，其他网站按下面的设置走。", "Rule: China sites go direct; other sites follow the settings below.");
   $("defaultHint").textContent = S.globalMode
     ? L("全局模式下所有网站都走这里（局域网除外）。分组可以在「设置 → 节点分组」里修改。", "In Global mode every site uses this (except your local network). Edit groups in Settings → Node groups.")
     : L("没有单独设置的网站都走这里。国内网站始终直连。分组可以在「设置 → 节点分组」里修改。", "Sites without their own setting use this. China sites always go direct. Edit groups in Settings → Node groups.");
@@ -201,7 +201,6 @@ function renderSubs() {
 
 const CAT_ORDER = ["AI", "视频", "社交", "常用", "科研", "国内", "我添加的"];
 function renderSites() {
-  $("globalWarn").classList.toggle("hidden", !S.globalMode);
   const fb = S.fallbacks || [];
   $("fallbackWarn").classList.toggle("hidden", !fb.length);
   $("fallbackWarn").textContent = fb.length
