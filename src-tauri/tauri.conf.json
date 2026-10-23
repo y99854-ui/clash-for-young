@@ -25,7 +25,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/mihomo"],
+    "externalBin": [
+      "binaries/mihomo"
+    ],
     "resources": {
       "resources/geo/": "geo/"
     },
@@ -39,6 +41,18 @@
     "windows": {
       "wix": {
         "language": "zh-CN"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI3MzM1NUM4NUZFQTU1MTIKUldRU1ZlcGZ5RlV6dHlnellscGZFWWdPU0FYeDZiTittL0ZOVTg5OVBiTkpFWDc2M0U5N0FYR1kK",
+      "endpoints": [
+        "https://github.com/y99854-ui/clash-for-young/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

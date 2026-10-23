@@ -19,6 +19,7 @@ regex = "1"
 sysproxy = "0.3"
 tokio = { version = "1", features = ["macros", "time", "rt"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
