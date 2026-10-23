@@ -43,7 +43,7 @@ pub fn enable(dir: &Path, port: u16) -> Result<(), String> {
         }
     }
     let p = Sysproxy { enable: true, host: HOST.into(), port, bypass: BYPASS.into() };
-    p.set_system_proxy().map_err(|e| format!("设置系统代理失败：{e}"))
+    p.set_system_proxy().map_err(|e| crate::tr!("设置系统代理失败：{e}", "Failed to set the system proxy: {e}"))
 }
 
 /// 恢复连接前的系统代理设置；没有备份就直接关闭
@@ -62,7 +62,7 @@ pub fn disable(dir: &Path, port: u16) -> Result<(), String> {
         }
         None => Sysproxy { enable: false, host: HOST.into(), port, bypass: BYPASS.into() },
     };
-    let r = restore.set_system_proxy().map_err(|e| format!("恢复系统代理失败：{e}"));
+    let r = restore.set_system_proxy().map_err(|e| crate::tr!("恢复系统代理失败：{e}", "Failed to restore the system proxy: {e}"));
     let _ = std::fs::remove_file(backup_path(dir));
     r
 }

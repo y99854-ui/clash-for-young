@@ -10,6 +10,35 @@ use tauri::{AppHandle, Manager};
 
 const TRAY_ID: &str = "main";
 
+/// 菜单项，切换语言时改文字
+struct Items {
+    show: MenuItem<tauri::Wry>,
+    connect: MenuItem<tauri::Wry>,
+    disconnect: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+}
+static ITEMS: std::sync::OnceLock<Items> = std::sync::OnceLock::new();
+
+fn tooltip(on: bool) -> String {
+    if on {
+        tr!("Clash for Young · 已连接", "Clash for Young · Connected")
+    } else {
+        tr!("Clash for Young · 未连接", "Clash for Young · Not connected")
+    }
+}
+
+/// 语言切换后更新托盘菜单和提示文字
+pub fn relabel(app: &AppHandle) {
+    if let Some(i) = ITEMS.get() {
+        let _ = i.show.set_text(tr!("打开 Clash for Young", "Open Clash for Young"));
+        let _ = i.connect.set_text(tr!("连接", "Connect"));
+        let _ = i.disconnect.set_text(tr!("断开", "Disconnect"));
+        let _ = i.quit.set_text(tr!("退出", "Quit"));
+    }
+    *LAST.lock().unwrap() = None;
+    refresh(app);
+}
+
 fn tray_icon(on: bool) -> Image<'static> {
     let bytes: &'static [u8] =
         if on { include_bytes!("../icons/tray-awake.png") } else { include_bytes!("../icons/tray-sleep.png") };
@@ -64,17 +93,18 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "打开 Clash for Young", true, None::<&str>)?;
-    let connect = MenuItem::with_id(app, "connect", "连接", true, None::<&str>)?;
-    let disconnect = MenuItem::with_id(app, "disconnect", "断开", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", tr!("打开 Clash for Young", "Open Clash for Young"), true, None::<&str>)?;
+    let connect = MenuItem::with_id(app, "connect", tr!("连接", "Connect"), true, None::<&str>)?;
+    let disconnect = MenuItem::with_id(app, "disconnect", tr!("断开", "Disconnect"), true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", tr!("退出", "Quit"), true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&show, &sep1, &connect, &disconnect, &sep2, &quit])?;
+    let _ = ITEMS.set(Items { show: show.clone(), connect: connect.clone(), disconnect: disconnect.clone(), quit: quit.clone() });
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(tray_icon(false))
-        .tooltip("Clash for Young · 未连接")
+        .tooltip(tooltip(false))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id().as_ref() {
@@ -119,7 +149,7 @@ pub fn refresh(app: &AppHandle) {
     }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_icon(Some(tray_icon(on)));
-        let _ = tray.set_tooltip(Some(if on { "Clash for Young · 已连接" } else { "Clash for Young · 未连接" }));
+        let _ = tray.set_tooltip(Some(tooltip(on)));
     }
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.set_icon(window_icon(on));

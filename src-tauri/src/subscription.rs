@@ -16,7 +16,7 @@ pub fn default_groups() -> Vec<NodeGroup> {
     vec![
         NodeGroup {
             id: "us".into(),
-            name: "美国".into(),
+            name: crate::tr!("美国", "United States"),
             keywords: kw(&[
                 "🇺🇸", "美国", "美國", "洛杉矶", "洛杉磯", "硅谷", "圣何塞", "聖何塞", "西雅图", "纽约", "紐約", "芝加哥",
                 "达拉斯", "凤凰城", "US", "USA", "United States", "America", "Los Angeles", "San Jose", "Seattle",
@@ -25,7 +25,7 @@ pub fn default_groups() -> Vec<NodeGroup> {
         },
         NodeGroup {
             id: "tw".into(),
-            name: "台湾".into(),
+            name: crate::tr!("台湾", "Taiwan"),
             keywords: kw(&["🇹🇼", "台湾", "台灣", "台北", "新北", "彰化", "TW", "Taiwan", "Taipei"]),
             nodes: vec![],
         },
@@ -152,7 +152,7 @@ fn info_regex() -> &'static Regex {
 pub fn validate(text: &str) -> Result<usize, String> {
     let n = usable_items(text)?.len();
     if n == 0 {
-        return Err("订阅里没有可用的节点。请确认链接或文件正确、套餐没有过期。".into());
+        return Err(crate::tr!("订阅里没有可用的节点。请确认链接或文件正确、套餐没有过期。", "The subscription has no usable nodes. Check that the link or file is correct and your plan hasn't expired."));
     }
     Ok(n)
 }
@@ -266,13 +266,13 @@ pub fn parse(text: &str, defs: &[NodeGroup]) -> Result<Parsed, String> {
 fn not_clash_hint(text: &str) -> String {
     let t = text.trim();
     if t.starts_with('<') {
-        return "订阅链接返回的是网页而不是订阅内容。请检查链接是否完整。".into();
+        return crate::tr!("订阅链接返回的是网页而不是订阅内容。请检查链接是否完整。", "The subscription link returned a web page instead of a subscription. Check that the link is complete.");
     }
     let looks_b64 = !t.is_empty() && t.len() > 20 && t.chars().all(|c| c.is_ascii_alphanumeric() || "+/=_-\r\n".contains(c));
     if looks_b64 || t.contains("://") {
-        return "这不是 Clash 格式的订阅。请在机场后台复制「Clash」或「Clash Meta / mihomo」订阅链接。".into();
+        return crate::tr!("这不是 Clash 格式的订阅。请在机场后台复制「Clash」或「Clash Meta / mihomo」订阅链接。", "This isn't a Clash-format subscription. In your provider's dashboard, copy the \"Clash\" or \"Clash Meta / mihomo\" subscription link.");
     }
-    "无法识别订阅内容，请确认复制的是 Clash 订阅链接。".into()
+    crate::tr!("无法识别订阅内容，请确认复制的是 Clash 订阅链接。", "Couldn't recognize the subscription content. Make sure you copied a Clash subscription link.")
 }
 
 /// 解析响应头 subscription-userinfo: upload=1; download=2; total=3; expire=4
@@ -304,9 +304,9 @@ pub struct Fetched {
 /// 下载订阅。先直连；失败且给了本软件的代理端口时，再经代理试一次。
 pub async fn fetch(url: &str, via_proxy_port: Option<u16>) -> Result<Fetched, String> {
     let url = url.trim();
-    let parsed = url::Url::parse(url).map_err(|_| "订阅链接格式不对，应以 http:// 或 https:// 开头。".to_string())?;
+    let parsed = url::Url::parse(url).map_err(|_| crate::tr!("订阅链接格式不对，应以 http:// 或 https:// 开头。", "Invalid subscription link: it should start with http:// or https://."))?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err("订阅链接应以 http:// 或 https:// 开头。".into());
+        return Err(crate::tr!("订阅链接应以 http:// 或 https:// 开头。", "The subscription link should start with http:// or https://."));
     }
     match fetch_once(url, None).await {
         Ok(f) => Ok(f),
@@ -326,25 +326,25 @@ async fn fetch_once(url: &str, proxy_port: Option<u16>) -> Result<Fetched, Strin
         None => b.no_proxy(),
     };
     let client = b.build().map_err(|e| e.to_string())?;
-    let resp = client.get(url).send().await.map_err(|e| format!("下载订阅失败：{}", short_err(&e)))?;
+    let resp = client.get(url).send().await.map_err(|e| crate::tr!("下载订阅失败：{}", "Failed to download the subscription: {}", short_err(&e)))?;
     let status = resp.status();
     if !status.is_success() {
-        return Err(format!("下载订阅失败：服务器返回 {}。链接可能已失效，请到机场后台重新复制。", status.as_u16()));
+        return Err(crate::tr!("下载订阅失败：服务器返回 {}。链接可能已失效，请到机场后台重新复制。", "Failed to download the subscription: the server returned {}. The link may have expired; copy it again from your provider's dashboard.", status.as_u16()));
     }
     let usage = resp
         .headers()
         .get("subscription-userinfo")
         .and_then(|v| v.to_str().ok())
         .and_then(parse_usage);
-    let text = resp.text().await.map_err(|e| format!("下载订阅失败：{}", short_err(&e)))?;
+    let text = resp.text().await.map_err(|e| crate::tr!("下载订阅失败：{}", "Failed to download the subscription: {}", short_err(&e)))?;
     Ok(Fetched { text, usage })
 }
 
 fn short_err(e: &reqwest::Error) -> String {
     if e.is_timeout() {
-        "连接超时".into()
+        crate::tr!("连接超时", "connection timed out")
     } else if e.is_connect() {
-        "连不上订阅服务器".into()
+        crate::tr!("连不上订阅服务器", "can't reach the subscription server")
     } else {
         e.to_string()
     }

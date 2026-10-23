@@ -68,8 +68,8 @@ fn proxy_url(app: &AppHandle) -> Option<url::Url> {
 
 /// 检查一次。有新版本返回 Some。本地开发版不会检查。
 pub async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
-    if crate::app::app_version() == "开发版" {
-        return Err("开发版不检查更新。".into());
+    if crate::app::app_version() == crate::app::DEV_VERSION {
+        return Err(crate::tr!("开发版不检查更新。", "Development builds don't check for updates."));
     }
     if INSTALLING.load(Ordering::SeqCst) {
         return Ok(available());
@@ -79,7 +79,7 @@ pub async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
         b = b.proxy(p);
     }
     let up =
-        b.build().map_err(|e| format!("无法检查更新：{e}"))?.check().await.map_err(|e| format!("检查更新失败：{e}"))?;
+        b.build().map_err(|e| crate::tr!("无法检查更新：{e}", "Can't check for updates: {e}"))?.check().await.map_err(|e| crate::tr!("检查更新失败：{e}", "Update check failed: {e}"))?;
     let Some(up) = up else {
         *FOUND.lock().unwrap() = None;
         return Ok(None);
@@ -102,9 +102,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
     if !INSTALLING.load(Ordering::SeqCst) {
         let _ = check(app).await;
     }
-    let up = FOUND.lock().unwrap().as_ref().map(|(u, _)| u.clone()).ok_or("没有可安装的新版本。")?;
+    let up = FOUND.lock().unwrap().as_ref().map(|(u, _)| u.clone()).ok_or_else(|| crate::tr!("没有可安装的新版本。", "No new version to install."))?;
     if INSTALLING.swap(true, Ordering::SeqCst) {
-        return Err("正在更新中。".into());
+        return Err(crate::tr!("正在更新中。", "An update is already in progress."));
     }
     set_error_clear();
     let r = do_install(app, up).await;
@@ -136,7 +136,7 @@ async fn do_install(app: &AppHandle, up: Update) -> Result<(), String> {
             || {},
         )
         .await
-        .map_err(|e| format!("下载新版本失败：{e}"))?;
+        .map_err(|e| crate::tr!("下载新版本失败：{e}", "Failed to download the new version: {e}"))?;
 
     // 下载完：先断开、恢复系统代理。Windows 的安装程序会直接结束本软件，来不及在退出时恢复，
     // 不先恢复的话电脑会一直指向已经不存在的代理，上不了网。
@@ -154,7 +154,7 @@ async fn do_install(app: &AppHandle, up: Update) -> Result<(), String> {
         if was_connected {
             let _ = st.connect().await;
         }
-        return Err(format!("安装新版本失败：{e}"));
+        return Err(crate::tr!("安装新版本失败：{e}", "Failed to install the new version: {e}"));
     }
     // Mac：新版本已替换好，重启生效。Windows 走不到这里（安装程序接管，装完自动打开新版本）
     app.restart();

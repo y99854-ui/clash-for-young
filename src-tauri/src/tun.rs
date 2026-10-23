@@ -81,7 +81,7 @@ pub fn privileged(bin: Option<&Path>) -> bool {
 pub fn grant(bin: &Path, stage: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        std::fs::copy(bin, stage).map_err(|e| format!("无法准备内核文件：{e}"))?;
+        std::fs::copy(bin, stage).map_err(|e| crate::tr!("无法准备内核文件：{e}", "Can't prepare the core file: {e}"))?;
         let q = |p: &Path| {
             p.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"").replace('\'', "'\\\\''")
         };
@@ -92,14 +92,16 @@ pub fn grant(bin: &Path, stage: &Path) -> Result<(), String> {
             src = q(stage),
             dst = q(&dst),
         );
-        let script = format!(
-            "do shell script \"{cmd}\" with prompt \"Clash for Young 需要管理员权限来开启增强模式（TUN）。\" with administrator privileges"
+        let prompt = crate::tr!(
+            "Clash for Young 需要管理员权限来开启增强模式（TUN）。",
+            "Clash for Young needs administrator permission to turn on Enhanced mode (TUN)."
         );
+        let script = format!("do shell script \"{cmd}\" with prompt \"{prompt}\" with administrator privileges");
         let out = std::process::Command::new("osascript")
             .current_dir("/")
             .args(["-e", &script])
             .output()
-            .map_err(|e| format!("无法请求管理员权限：{e}"));
+            .map_err(|e| crate::tr!("无法请求管理员权限：{e}", "Can't request administrator permission: {e}"));
         let _ = std::fs::remove_file(stage);
         let out = out?;
         if out.status.success() {
@@ -107,12 +109,12 @@ pub fn grant(bin: &Path, stage: &Path) -> Result<(), String> {
         }
         let err = String::from_utf8_lossy(&out.stderr);
         if err.contains("-128") || err.to_lowercase().contains("cancel") {
-            return Err("已取消授权。".into());
+            return Err(crate::tr!("已取消授权。", "Authorization cancelled."));
         }
-        return Err(format!("授权失败：{}", err.trim()));
+        return Err(crate::tr!("授权失败：{}", "Authorization failed: {}", err.trim()));
     }
     #[allow(unreachable_code)]
-    Err("当前系统不支持这种授权方式。".into())
+    Err(crate::tr!("当前系统不支持这种授权方式。", "This system doesn't support this kind of authorization."))
 }
 
 /// Windows：以管理员身份重新打开本软件（会弹出 UAC 确认）
@@ -140,8 +142,8 @@ pub fn relaunch_as_admin() -> Result<(), String> {
         if r as isize > 32 {
             return Ok(());
         }
-        return Err("没有获得管理员权限（可能在弹窗里点了“否”）。".into());
+        return Err(crate::tr!("没有获得管理员权限（可能在弹窗里点了“否”）。", "Didn't get administrator permission (you may have clicked \"No\" in the prompt)."));
     }
     #[allow(unreachable_code)]
-    Err("只有 Windows 需要这样做。".into())
+    Err(crate::tr!("只有 Windows 需要这样做。", "This is only needed on Windows."))
 }

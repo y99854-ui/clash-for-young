@@ -95,6 +95,8 @@ pub struct Settings {
     pub global_mode: bool,
     /// 自动更新前处于连接状态：更新后重新打开时自动连上
     pub resume_after_update: bool,
+    /// 界面语言：""（跟随系统）/ "zh" / "en"
+    pub language: String,
 }
 
 impl Default for Settings {
@@ -114,6 +116,7 @@ impl Default for Settings {
             tun_enabled: false,
             global_mode: false,
             resume_after_update: false,
+            language: String::new(),
         }
     }
 }
@@ -143,11 +146,11 @@ pub fn load(dir: &Path) -> Settings {
 }
 
 pub fn save(dir: &Path, s: &Settings) -> Result<(), String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("无法创建数据目录：{e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| crate::tr!("无法创建数据目录：{e}", "Can't create the data folder: {e}"))?;
     let text = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
     let tmp = dir.join("settings.json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("无法保存设置：{e}"))?;
-    std::fs::rename(&tmp, settings_path(dir)).map_err(|e| format!("无法保存设置：{e}"))
+    std::fs::write(&tmp, text).map_err(|e| crate::tr!("无法保存设置：{e}", "Can't save settings: {e}"))?;
+    std::fs::rename(&tmp, settings_path(dir)).map_err(|e| crate::tr!("无法保存设置：{e}", "Can't save settings: {e}"))
 }
 
 fn random_secret() -> String {
