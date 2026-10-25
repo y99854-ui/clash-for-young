@@ -1,4 +1,8 @@
 # 自动打包：Mac 通用版（Intel + Apple 芯片）和 Windows 安装包，并附到对应的 GitHub 发布页。
+# 同一套代码打包两个软件：
+#   - Clash for Young    → 本仓库的发布页
+#   - Clash for Research → y99854-ui/clash-for-research 仓库的发布页
+#     （需要本仓库的 Secret「RESEARCH_TOKEN」：能写 clash-for-research 的访问令牌；没有就只打包 Young）
 # 触发方式：
 #   1. 推送 v 开头的标签（如 git tag v0.1.0 && git push origin v0.1.0）
 #   2. 在仓库 Actions 页面手动运行，填入发布标签
@@ -18,40 +22,65 @@ permissions:
   contents: write
 
 jobs:
-  # 先建好发布页，两个打包任务再往里放文件。
-  # 以前两个任务各自建发布页，同时完成时会撞车（already_exists），其中一个失败。
+  # 先建好发布页，打包任务再往里放文件（多个任务各自建发布页会撞车）。
+  # 顺便决定这次打包哪些软件。
   release:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RESEARCH_TOKEN: ${{ secrets.RESEARCH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - name: 创建发布页
+      - name: 创建 Clash for Young 发布页
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "发布页 $TAG 已存在"
           else
             gh release create "$TAG" --target "$GITHUB_SHA" --title "Clash for Young $TAG" --notes-file release-notes.md
           fi
+      - name: 创建 Clash for Research 发布页
+        if: env.RESEARCH_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.RESEARCH_TOKEN }}
+        run: |
+          R=y99854-ui/clash-for-research
+          if gh release view "$TAG" --repo "$R" >/dev/null 2>&1; then
+            echo "发布页 $TAG 已存在"
+          else
+            gh release create "$TAG" --repo "$R" --title "Clash for Research $TAG" --notes-file release-notes-research.md
+          fi
+      - name: 决定打包哪些软件
+        id: m
+        run: |
+          young_mac='{"platform":"macos-latest","target":"universal-apple-darwin","edition":"young","name":"Clash for Young","slug":"clash-for-young","repo":"clash-for-young","notes":"release-notes.md","icon":"src-tauri/icons/app-icon.png","icondir":"src-tauri/icons","args":"--target universal-apple-darwin"}'
+          young_win='{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","edition":"young","name":"Clash for Young","slug":"clash-for-young","repo":"clash-for-young","notes":"release-notes.md","icon":"src-tauri/icons/app-icon.png","icondir":"src-tauri/icons","args":""}'
+          research_mac='{"platform":"macos-latest","target":"universal-apple-darwin","edition":"research","name":"Clash for Research","slug":"clash-for-research","repo":"clash-for-research","notes":"release-notes-research.md","icon":"src-tauri/icons-research/app-icon.png","icondir":"src-tauri/icons-research","args":"--config src-tauri/research.conf.json --target universal-apple-darwin"}'
+          research_win='{"platform":"windows-latest","target":"x86_64-pc-windows-msvc","edition":"research","name":"Clash for Research","slug":"clash-for-research","repo":"clash-for-research","notes":"release-notes-research.md","icon":"src-tauri/icons-research/app-icon.png","icondir":"src-tauri/icons-research","args":"--config src-tauri/research.conf.json"}'
+          list="$young_mac,$young_win"
+          if [ -n "$RESEARCH_TOKEN" ]; then
+            list="$list,$research_mac,$research_win"
+          else
+            echo "没有 RESEARCH_TOKEN，这次只打包 Clash for Young"
+          fi
+          echo "matrix={\"include\":[$list]}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: release
+    name: ${{ matrix.name }} (${{ matrix.platform }})
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            target: universal-apple-darwin
-            args: --target universal-apple-darwin
-          - platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            args: ""
+      matrix: ${{ fromJSON(needs.release.outputs.matrix) }}
     runs-on: ${{ matrix.platform }}
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       # 编译进软件，显示在设置页底部
       CFY_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
+      # young / research：决定打包哪个软件（名字、默认网站、科研功能）
+      CFY_EDITION: ${{ matrix.edition }}
 
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +97,7 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          key: ${{ matrix.edition }}
 
       - run: npm ci
 
@@ -81,8 +111,8 @@ jobs:
           node -e "const f='src-tauri/tauri.conf.json';const c=require('./'+f);c.version='0.0.$N';require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
           grep '"version"' src-tauri/tauri.conf.json
 
-      # 由小猫原图生成各尺寸的应用图标（icns / ico / png）
-      - run: npx tauri icon src-tauri/icons/app-icon.png
+      # 由小猫原图生成各尺寸的应用图标（icns / ico / png）；科研版是绿色的
+      - run: npx tauri icon ${{ matrix.icon }} -o ${{ matrix.icondir }}
 
       # 下载 mihomo 内核和地理数据，打进安装包
       - run: node scripts/fetch-deps.mjs --target ${{ matrix.target }}
@@ -90,34 +120,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 单元测试（只在 Mac 上跑一次）
-      - if: matrix.platform == 'macos-latest'
+      - if: matrix.platform == 'macos-latest' && matrix.edition == 'young'
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      # 发布说明：仓库根目录的 release-notes.md（每次发版前改写）
+      # 发布说明：release-notes.md / release-notes-research.md（每次发版前改写）
       - name: 读取发布说明
         id: notes
         shell: bash
         run: |
           {
             echo 'body<<NOTES_EOF'
-            cat release-notes.md 2>/dev/null || true
+            cat "${{ matrix.notes }}" 2>/dev/null || true
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
       - uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 科研版发布到另一个仓库，要用能写那个仓库的令牌
+          GITHUB_TOKEN: ${{ matrix.edition == 'research' && secrets.RESEARCH_TOKEN || secrets.GITHUB_TOKEN }}
           # 给更新包签名的私钥（仓库 Settings → Secrets 里的 TAURI_SIGNING_PRIVATE_KEY）。
-          # 软件里内置对应的公钥，只安装用这把私钥签过的更新包。
+          # 软件里内置对应的公钥，只安装用这把私钥签过的更新包。两个软件用同一把。
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          owner: y99854-ui
+          repo: ${{ matrix.repo }}
           tagName: ${{ env.TAG }}
-          releaseName: Clash for Young ${{ env.TAG }}
+          releaseName: ${{ matrix.name }} ${{ env.TAG }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           args: ${{ matrix.args }}
-          assetNamePattern: clash-for-young_${{ env.TAG }}_[arch][setup][ext]
+          assetNamePattern: ${{ matrix.slug }}_${{ env.TAG }}_[arch][setup][ext]
           # 生成 latest.json（软件检查更新时读它）；Windows 用 setup.exe 那种安装包更新
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
