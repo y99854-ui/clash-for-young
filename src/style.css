@@ -245,3 +245,15 @@ button.brand { background: none; border: 0; padding: 4px 6px; margin-left: -6px;
 button.brand:hover { background: var(--chip); }
 /* 右上角分享 */
 .share-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; flex-shrink: 0; }
+
+/* ───── 科研版 Clash for Research：绿色 ───── */
+body.edition-research { --accent: #128a5b; --accent-soft: #e1f4ec; }
+@media (prefers-color-scheme: dark) {
+  body.edition-research { --accent: #3cc48c; --accent-soft: #153327; }
+}
+body.edition-research .power { background: linear-gradient(#46665a, #26392f); }
+body.edition-research .power.on { background: linear-gradient(#1f9a68, #0d5a3a); }
+body.edition-research .seg button.active { color: #fff; }
+.campus-tag { font-size: 10px; color: var(--good); border: 1px solid var(--good); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.site-row select:disabled { opacity: .55; }
+.copy-row { flex-wrap: wrap; }

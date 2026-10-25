@@ -52,6 +52,7 @@
       <div class="hero-text">
         <div class="conn-line"><span id="connText" class="conn-text">未连接</span><span id="tunTag" class="tun-tag hidden" data-en="Enhanced">增强模式</span><span id="globalTag" class="tun-tag hidden" data-en="Global">全局</span></div>
         <div id="nowText" class="muted"></div>
+        <div id="stableText" class="muted small hidden"></div>
       </div>
     </section>
 
@@ -85,6 +86,16 @@
           <button type="button" data-global="0" data-en="Rule">规则</button>
           <button type="button" data-global="1" data-en="Global">全局</button>
         </div>
+      </div>
+    </section>
+
+    <section class="card hidden" id="campusCard">
+      <div class="sub-line">
+        <div>
+          <div class="field-title" data-en="I'm on the campus network">我在校园网</div>
+          <div class="muted small" data-en="Publishers and databases go direct, so your school's subscriptions let you download full text. Google Scholar and other sites still use the proxy. Turn this off when you leave campus.">出版社和数据库直连，用学校的订阅下载全文；Google Scholar 等其他网站仍走代理。离开学校后记得关掉。</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="campusToggle" /></label>
       </div>
     </section>
 
@@ -151,6 +162,17 @@
         <span class="spacer"></span>
         <button type="button" id="tunFixBtn" class="ghost hidden"></button>
       </div>
+    </details>
+
+    <details class="card fold hidden" id="termBox">
+      <summary><span class="fold-title" data-en="Terminal &amp; dev tools">终端与开发工具</span><span id="termSummary" class="muted small"></span></summary>
+      <p class="muted small" data-en="While connected, newly opened terminals use the proxy automatically: git, pip, conda, Hugging Face, curl and more. It's undone when you disconnect, so your terminal still works when the app is off.">连接时，新打开的终端自动走代理：git、pip、conda、Hugging Face、curl 等都会用它。断开时自动撤销，软件关着时终端照常上网。</p>
+      <div class="row actions">
+        <label class="switch"><input type="checkbox" id="termToggle" /><span data-en="Proxy new terminals while connected">连接时让新终端走代理</span></label>
+      </div>
+      <p class="muted small" data-en="For a terminal that's already open, copy a command and paste it in:">已经打开的终端：复制下面的命令粘贴进去。</p>
+      <div class="row actions copy-row" id="termCopy"></div>
+      <p class="muted small" data-en="Tip: Enhanced mode takes over every app, terminals included, so with it on you don't need this.">提示：增强模式会接管所有程序（包括终端），开了增强模式就不需要这一项。</p>
     </details>
 
     <details class="card fold" id="mobileBox">

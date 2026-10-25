@@ -1,4 +1,4 @@
-// Clash for Young 界面逻辑。所有操作都通过 invoke() 交给 Rust 后端。
+// Clash for Young / Clash for Research 界面逻辑（同一套代码，S.edition 区分）。所有操作都通过 invoke() 交给 Rust 后端。
 const { invoke } = window.__TAURI__.core;
 
 const $ = (id) => document.getElementById(id);
@@ -12,6 +12,8 @@ let delays = {};       // 节点延迟
 
 // ───────── 中英文 ─────────
 let LANG = "zh";       // 实际使用的语言，来自后端 S.lang
+let APP = "Clash for Young";  // 软件名，来自后端 S.appName（科研版是 Clash for Research）
+const isResearch = () => S?.edition === "research";
 const isEn = () => LANG === "en";
 function L(zh, en) { return isEn() ? en : zh; }
 // 软件内部的名字（配置里的组名、内置网站分类和中文网站名）：英文界面显示英文
@@ -19,9 +21,22 @@ const NAME_EN = {
   "默认地区": "Default region", "自动选择": "Auto (fastest)", "其他": "Other", "直连": "Direct",
   "美国": "United States", "台湾": "Taiwan",
   "视频": "Video", "社交": "Social", "常用": "Everyday", "科研": "Research", "国内": "China", "我添加的": "Added by me",
+  "稳定线路": "Stable line",
+  "文献检索": "Literature search", "出版社": "Publishers", "代码与数据": "Code & data", "写作工具": "Writing tools",
+  "会议交流": "Meetings & chat", "国内学术": "China academic",
+  "万方数据": "Wanfang Data", "维普": "CQVIP", "百度学术": "Baidu Scholar", "超星": "Chaoxing",
   "中国知网": "CNKI", "哔哩哔哩": "Bilibili", "百度": "Baidu", "淘宝": "Taobao", "知乎": "Zhihu", "微信": "WeChat", "小红书": "Xiaohongshu (RED)",
 };
 const dn = (name) => (isEn() && NAME_EN[name]) || name;
+// 页面里写死的 “Clash for Young” 换成当前软件名（科研版）
+function fixAppName() {
+  document.title = APP;
+  if (APP === "Clash for Young") return;
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = w.nextNode())) if (n.nodeValue.includes("Clash for Young")) n.nodeValue = n.nodeValue.replaceAll("Clash for Young", APP);
+  for (const el of document.querySelectorAll("[title]")) el.title = el.title.replaceAll("Clash for Young", APP);
+}
 // 把页面上带 data-en 的固定文字切换到当前语言
 function applyLang() {
   document.documentElement.lang = isEn() ? "en" : "zh-CN";
@@ -32,6 +47,7 @@ function applyLang() {
       el[attr] = isEn() ? el.dataset[key] : el.dataset[zhKey];
     });
   }
+  fixAppName();
   $("welcomeLang").innerHTML = isEn()
     ? `<button type="button" class="linklike" data-lang="zh">切换到中文</button>`
     : `<button type="button" class="linklike" data-lang="en">Switch to English</button>`;
@@ -83,6 +99,7 @@ function targetOptions(selected, mode) {
   const add = (v, label) => opts.push(`<option value="${esc(v)}"${v === selected ? " selected" : ""}>${esc(label)}</option>`);
   if (mode === "site") add("", L("自动", "Auto"));
   if (mode === "rule") add("default", L("默认地区", "Default region"));
+  if (mode !== "default" && isResearch()) add("stable", L("稳定线路（选好节点后不再换）", "Stable line (sticks to one node)"));
   if (mode === "default") add("fastest", L("自动（最快的节点）", "Auto (fastest node)"));
   else add("fastest", L("最快的节点", "Fastest node"));
   add("DIRECT", mode === "default" ? L("全部直连（不走代理）", "All direct (no proxy)") : L("直连", "Direct"));
@@ -118,7 +135,12 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
 function versionText(v) { return v === "dev" ? L("开发版", "dev build") : v || ""; }
 function render() {
   if (!S) return;
-  if ((S.lang || "zh") !== LANG || !$("welcomeLang").innerHTML) { LANG = S.lang || "zh"; applyLang(); }
+  if ((S.lang || "zh") !== LANG || !$("welcomeLang").innerHTML || (S.appName && S.appName !== APP)) {
+    LANG = S.lang || "zh";
+    APP = S.appName || APP;
+    document.body.classList.toggle("edition-research", isResearch());
+    applyLang();
+  }
   renderLang();
   if (!S.subscriptions.length) { show("welcome"); return; }
   if (view === "welcome") show("home");
@@ -153,6 +175,9 @@ function renderHome() {
     }
   } else if (!on) now = L("小猫在睡觉，点它开始上网", "The cat is asleep. Click it to get online.");
   $("nowText").innerHTML = now;
+  const showStable = isResearch() && on && status && status.stable;
+  $("stableText").classList.toggle("hidden", !showStable);
+  if (showStable) $("stableText").textContent = L(`稳定线路（Scholar、下载）· ${status.stable}`, `Stable line (Scholar, downloads) · ${status.stable}`);
 
   const err = status?.error || S.error;
   $("homeError").classList.toggle("hidden", !err);
@@ -199,7 +224,8 @@ function renderSubs() {
       </div></div>`).join("");
 }
 
-const CAT_ORDER = ["AI", "视频", "社交", "常用", "科研", "国内", "我添加的"];
+const CAT_ORDER_YOUNG = ["AI", "视频", "社交", "常用", "科研", "国内", "我添加的"];
+const CAT_ORDER_RESEARCH = ["文献检索", "出版社", "代码与数据", "写作工具", "AI", "会议交流", "常用", "国内学术", "我添加的"];
 function renderSites() {
   const fb = S.fallbacks || [];
   $("fallbackWarn").classList.toggle("hidden", !fb.length);
@@ -209,13 +235,19 @@ function renderSites() {
 
   const cats = {};
   for (const s of S.sites) (cats[s.cat] ||= []).push(s);
+  const CAT_ORDER = isResearch() ? CAT_ORDER_RESEARCH : CAT_ORDER_YOUNG;
   const order = Object.keys(cats).sort((a, b) => (CAT_ORDER.indexOf(a) + 99) % 99 - (CAT_ORDER.indexOf(b) + 99) % 99);
+  // 校园网
+  $("campusCard").classList.toggle("hidden", !isResearch());
+  $("campusToggle").checked = !!S.campusMode;
   $("siteGroups").innerHTML = order
     .map((cat) => `<div class="cat-title">${esc(dn(cat))}</div><div class="card site-card">${cats[cat]
       .map((s) => `<div class="site-row" data-id="${esc(s.id)}">
           <div><div class="site-name" data-edit="${esc(s.id)}" title="${L("点击编辑包含的域名", "Click to edit the domains")}">${esc(dn(s.name))}${s.edited ? `<span class="edited-tag">${L("已改", "edited")}</span>` : ""}</div>
             <div class="site-sub">${esc(s.domains.join("  "))}</div></div>
-          <select data-choice="${esc(s.id)}" class="${s.choice ? "set" : ""}">${targetOptions(s.choice, "site")}</select>
+          ${campusDirect(s)
+            ? `<select disabled title="${L("校园网直连中", "Direct on campus")}"><option>${L("直连（校园网）", "Direct (campus)")}</option></select>`
+            : `<select data-choice="${esc(s.id)}" class="${s.choice ? "set" : ""}">${targetOptions(s.choice, "site")}</select>`}
           <div class="site-actions"><button class="ghost small-btn" data-check="${esc(s.id)}">${L("检查", "Check")}</button></div>
           <div class="site-check hidden" id="chk-${esc(s.id)}"></div>
         </div>`)
@@ -246,7 +278,29 @@ function renderRules() {
     : `<p class="muted small">${L("还没有自定义规则。", "No custom rules yet.")}</p>`;
 }
 
+const campusDirect = (s) => isResearch() && S.campusMode && s.campus && !S.globalMode;
+
+// 终端代理：复制给已经打开的终端用的命令
+function termCommands() {
+  const u = `http://127.0.0.1:${S.mixedPort}`;
+  return {
+    unix: [L("复制 Mac / Linux 命令", "Copy Mac / Linux command"), `export http_proxy=${u} https_proxy=${u} HTTP_PROXY=${u} HTTPS_PROXY=${u}`],
+    ps: [L("复制 PowerShell 命令", "Copy PowerShell command"), `$env:HTTP_PROXY="${u}"; $env:HTTPS_PROXY="${u}"`],
+    cmd: [L("复制 CMD 命令", "Copy CMD command"), `set HTTP_PROXY=${u}&& set HTTPS_PROXY=${u}`],
+  };
+}
+function renderTerm() {
+  $("termBox").classList.toggle("hidden", !isResearch());
+  if (!isResearch()) return;
+  $("termToggle").checked = !!S.terminalProxy;
+  $("termSummary").textContent = S.terminalProxy ? L("已开启", "On") : L("关闭", "Off");
+  const keys = S.tun.platform === "windows" ? ["ps", "cmd"] : ["unix"];
+  const c = termCommands();
+  $("termCopy").innerHTML = keys.map((k) => `<button type="button" class="ghost small-btn" data-copy="${k}">${esc(c[k][0])}</button>`).join("");
+}
+
 function renderSettings() {
+  renderTerm();
   if (document.activeElement !== $("mixedPort")) $("mixedPort").value = S.mixedPort;
   if (document.activeElement !== $("ctlPort")) $("ctlPort").value = S.controllerPort;
   $("dataDir").textContent = L("数据目录：", "Data folder: ") + S.dataDir;
@@ -297,7 +351,7 @@ function renderTun() {
     hint = L("第一次开启会弹出系统密码框（输入开机密码），给代理内核授权。软件更新后需要再授权一次。", "The first time, macOS asks for your login password to authorize the proxy core. You'll need to authorize again after each app update.");
     if (t.enabled && !t.privileged) { hint = L("⚠️ 增强模式还没生效：代理内核需要重新授权（更新软件后会这样）。", "⚠️ Enhanced mode isn't active yet: the proxy core needs to be authorized again (this happens after an app update)."); fix = L("授权", "Authorize"); }
   } else if (t.platform === "windows") {
-    hint = L("需要以管理员身份运行 Clash for Young。开启后软件会以管理员身份重新启动（会弹出确认窗口）。", "Clash for Young needs to run as administrator. Turning this on restarts the app as administrator (Windows will ask you to confirm).");
+    hint = L(`需要以管理员身份运行 ${APP}。开启后软件会以管理员身份重新启动（会弹出确认窗口）。`, `${APP} needs to run as administrator. Turning this on restarts the app as administrator (Windows will ask you to confirm).`);
     if (t.enabled && !t.privileged) { hint = L("⚠️ 增强模式还没生效：需要以管理员身份运行。", "⚠️ Enhanced mode isn't active yet: the app needs to run as administrator."); fix = L("以管理员身份重新启动", "Restart as administrator"); }
   } else {
     hint = L("这个系统暂不支持增强模式。", "Enhanced mode isn't supported on this system.");
@@ -622,7 +676,7 @@ async function setTun(enabled) {
   } catch (err) {
     if (String(err) === "NEED_ADMIN") {
       await refreshState();
-      if (await askConfirm(L("增强模式需要以管理员身份运行。现在以管理员身份重新启动 Clash for Young 吗？（会弹出系统确认窗口）", "Enhanced mode needs administrator rights. Restart Clash for Young as administrator now? (Windows will ask you to confirm.)"))) {
+      if (await askConfirm(L(`增强模式需要以管理员身份运行。现在以管理员身份重新启动 ${APP} 吗？（会弹出系统确认窗口）`, `Enhanced mode needs administrator rights. Restart ${APP} as administrator now? (Windows will ask you to confirm.)`))) {
         try { await call("relaunch_as_admin"); } catch (_) {}
       }
     } else {
@@ -828,7 +882,7 @@ $("brandBtn").addEventListener("click", () => {
 });
 
 // ───────── 分享：复制下载链接（不含订阅链接） ─────────
-const DOWNLOAD_URL = "https://github.com/y99854-ui/clash-for-young/releases/latest";
+
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -846,9 +900,36 @@ async function copyText(text) {
   }
 }
 $("shareBtn").addEventListener("click", async () => {
-  const text = DOWNLOAD_URL;
+  const text = S?.downloadUrl || "https://github.com/y99854-ui/clash-for-young/releases/latest";
   if (await copyText(text)) toast(L("已复制下载链接，粘贴发给朋友吧", "Download link copied. Paste it to a friend."));
   else await askText(L("复制下面的链接发给朋友", "Copy this link and send it to a friend"), text);
+});
+
+// ───────── 科研版：校园网、终端代理 ─────────
+$("campusToggle").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  try {
+    S = await call("set_campus_mode", { on });
+    render();
+    toast(on ? L("校园网模式已开启：出版社和数据库直连", "Campus mode on: publishers and databases go direct") : L("校园网模式已关闭", "Campus mode off"));
+  } catch (_) { render(); }
+});
+$("termToggle").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  try {
+    S = await call("set_terminal_proxy", { on });
+    render();
+    toast(on
+      ? (S.connected ? L("已开启：新打开的终端会走代理", "On: new terminals will use the proxy") : L("已开启：连接后新打开的终端会走代理", "On: new terminals will use the proxy once you connect"))
+      : L("已关闭终端代理", "Terminal proxy off"));
+  } catch (_) { render(); }
+});
+$("termCopy").addEventListener("click", async (e) => {
+  const k = e.target.dataset.copy;
+  if (!k) return;
+  const cmd = termCommands()[k][1];
+  if (await copyText(cmd)) toast(L("已复制，粘贴到终端里回车即可", "Copied. Paste it into the terminal and press Enter."));
+  else await askText(L("复制下面的命令", "Copy this command"), cmd);
 });
 
 // ───────── 语言 ─────────
