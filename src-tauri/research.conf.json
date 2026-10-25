@@ -1,0 +1,32 @@
+{
+  "productName": "Clash for Research",
+  "identifier": "com.joe.clash-for-research",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Clash for Research",
+        "width": 960,
+        "height": 700,
+        "minWidth": 720,
+        "minHeight": 520
+      }
+    ]
+  },
+  "bundle": {
+    "icon": [
+      "icons-research/32x32.png",
+      "icons-research/128x128.png",
+      "icons-research/128x128@2x.png",
+      "icons-research/icon.icns",
+      "icons-research/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/y99854-ui/clash-for-research/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}
