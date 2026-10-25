@@ -18,11 +18,27 @@ pub struct Site {
     /// 内置网站的域名被用户改过
     #[serde(default)]
     pub edited: bool,
+    /// 用户没选过时的默认走向（科研版：Scholar、下载类网站默认走 "stable"）
+    #[serde(default, rename = "default")]
+    pub default_choice: String,
+    /// 学校订阅的数据库 / 出版社：开启“我在校园网”时直连，用学校的订阅
+    #[serde(default)]
+    pub campus: bool,
 }
 
 pub fn builtin() -> &'static Vec<Site> {
     static S: OnceLock<Vec<Site>> = OnceLock::new();
-    S.get_or_init(|| serde_json::from_str(include_str!("sites.json")).expect("sites.json"))
+    static R: OnceLock<Vec<Site>> = OnceLock::new();
+    if crate::edition::is_research() {
+        R.get_or_init(|| serde_json::from_str(include_str!("sites-research.json")).expect("sites-research.json"))
+    } else {
+        S.get_or_init(|| serde_json::from_str(include_str!("sites.json")).expect("sites.json"))
+    }
+}
+
+/// 网站当前的走向：用户选过的，没选过就用默认
+pub fn choice_of<'a>(st: &'a Settings, site: &'a Site) -> &'a str {
+    st.site_choices.get(&site.id).map(|s| s.as_str()).unwrap_or(&site.default_choice)
 }
 
 pub const CUSTOM_CAT: &str = "我添加的";
@@ -50,6 +66,8 @@ pub fn catalog(st: &Settings) -> Vec<Site> {
             domains: c.domains.clone(),
             custom: true,
             edited: false,
+            default_choice: String::new(),
+            campus: false,
         });
     }
     out
@@ -82,6 +100,26 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), b.len());
+    }
+
+    #[test]
+    fn research_catalog() {
+        let b: Vec<Site> = serde_json::from_str(include_str!("sites-research.json")).unwrap();
+        let mut ids: Vec<_> = b.iter().map(|s| &s.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), b.len(), "id 重复");
+        // Scholar 必须排在 Google 前面：规则按顺序匹配，scholar.googleusercontent.com 不能被 Google 先吃掉
+        let pos = |id: &str| b.iter().position(|s| s.id == id).unwrap();
+        assert!(pos("scholar") < pos("google"));
+        assert!(pos("gdocs") < pos("google"));
+        assert!(b.iter().any(|s| s.campus) && b.iter().any(|s| s.default_choice == "stable"));
+        for s in &b {
+            assert!(!s.domains.is_empty() && !s.url.is_empty(), "{}", s.id);
+            for d in &s.domains {
+                assert!(!d.contains('/') && !d.contains(' ') && d.contains('.'), "{} {}", s.id, d);
+            }
+        }
     }
 
     #[test]

@@ -18,10 +18,12 @@ pub fn platform() -> &'static str {
 /// Mac：授权后的内核副本放在这里（root 所有、setuid）。
 /// 不能直接改安装位置的文件：macOS 不允许管理员进程修改「文稿」等受保护文件夹里的文件，
 /// 而且软件更新会把它覆盖掉。
-pub const MAC_PRIV_DIR: &str = "/Library/Application Support/ClashForYoung";
+pub fn mac_priv_dir() -> &'static str {
+    crate::edition::mac_priv_dir()
+}
 
 pub fn mac_priv_bin() -> std::path::PathBuf {
-    Path::new(MAC_PRIV_DIR).join("mihomo")
+    Path::new(mac_priv_dir()).join("mihomo")
 }
 
 /// 增强模式下实际启动的内核文件：Mac 用授权过的副本，其他系统用安装包里的
@@ -74,7 +76,7 @@ pub fn privileged(bin: Option<&Path>) -> bool {
     false
 }
 
-/// Mac：弹出系统密码框，把内核复制到 MAC_PRIV_DIR 并授权。
+/// Mac：弹出系统密码框，把内核复制到 mac_priv_dir() 并授权。
 /// stage：先由本软件（普通权限）把内核复制到这个临时位置，管理员命令再从这里拷走，
 /// 避免管理员进程去读受保护的文件夹。
 #[allow(unused_variables)]
@@ -88,13 +90,14 @@ pub fn grant(bin: &Path, stage: &Path) -> Result<(), String> {
         let dst = mac_priv_bin();
         let cmd = format!(
             "mkdir -p '{dir}' && cp -f '{src}' '{dst}' && chown root:wheel '{dst}' && chmod 4755 '{dst}'",
-            dir = q(Path::new(MAC_PRIV_DIR)),
+            dir = q(Path::new(mac_priv_dir())),
             src = q(stage),
             dst = q(&dst),
         );
+        let app = crate::edition::name();
         let prompt = crate::tr!(
-            "Clash for Young 需要管理员权限来开启增强模式（TUN）。",
-            "Clash for Young needs administrator permission to turn on Enhanced mode (TUN)."
+            "{app} 需要管理员权限来开启增强模式（TUN）。",
+            "{app} needs administrator permission to turn on Enhanced mode (TUN)."
         );
         let script = format!("do shell script \"{cmd}\" with prompt \"{prompt}\" with administrator privileges");
         let out = std::process::Command::new("osascript")

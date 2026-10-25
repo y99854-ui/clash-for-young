@@ -97,6 +97,10 @@ pub struct Settings {
     pub resume_after_update: bool,
     /// 界面语言：""（跟随系统）/ "zh" / "en"
     pub language: String,
+    /// 科研版：我在校园网（出版社、数据库直连，用学校的订阅）
+    pub campus_mode: bool,
+    /// 科研版：连接时让新打开的终端走代理（git、pip、conda 等）
+    pub terminal_proxy: bool,
 }
 
 impl Default for Settings {
@@ -109,14 +113,16 @@ impl Default for Settings {
             custom_sites: vec![],
             custom_rules: vec![],
             groups: None,
-            mixed_port: 7899,
-            controller_port: 9098,
+            mixed_port: crate::edition::default_ports().0,
+            controller_port: crate::edition::default_ports().1,
             secret: String::new(),
             was_connected: false,
             tun_enabled: false,
             global_mode: false,
             resume_after_update: false,
             language: String::new(),
+            campus_mode: false,
+            terminal_proxy: false,
         }
     }
 }

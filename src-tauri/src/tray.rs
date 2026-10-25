@@ -21,16 +21,19 @@ static ITEMS: std::sync::OnceLock<Items> = std::sync::OnceLock::new();
 
 fn tooltip(on: bool) -> String {
     if on {
-        tr!("Clash for Young · 已连接", "Clash for Young · Connected")
+        let app = crate::edition::name();
+        tr!("{app} · 已连接", "{app} · Connected")
     } else {
-        tr!("Clash for Young · 未连接", "Clash for Young · Not connected")
+        let app = crate::edition::name();
+        tr!("{app} · 未连接", "{app} · Not connected")
     }
 }
 
 /// 语言切换后更新托盘菜单和提示文字
 pub fn relabel(app: &AppHandle) {
     if let Some(i) = ITEMS.get() {
-        let _ = i.show.set_text(tr!("打开 Clash for Young", "Open Clash for Young"));
+        let app_name = crate::edition::name();
+        let _ = i.show.set_text(tr!("打开 {app_name}", "Open {app_name}"));
         let _ = i.connect.set_text(tr!("连接", "Connect"));
         let _ = i.disconnect.set_text(tr!("断开", "Disconnect"));
         let _ = i.quit.set_text(tr!("退出", "Quit"));
@@ -46,8 +49,13 @@ fn tray_icon(on: bool) -> Image<'static> {
 }
 
 fn window_icon(on: bool) -> Image<'static> {
-    let bytes: &'static [u8] =
-        if on { include_bytes!("../icons/window-awake.png") } else { include_bytes!("../icons/window-sleep.png") };
+    // 科研版：绿色背景的小猫
+    let bytes: &'static [u8] = match (crate::edition::is_research(), on) {
+        (false, true) => include_bytes!("../icons/window-awake.png"),
+        (false, false) => include_bytes!("../icons/window-sleep.png"),
+        (true, true) => include_bytes!("../icons-research/window-awake.png"),
+        (true, false) => include_bytes!("../icons-research/window-sleep.png"),
+    };
     Image::from_bytes(bytes).expect("window icon")
 }
 
@@ -93,7 +101,8 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", tr!("打开 Clash for Young", "Open Clash for Young"), true, None::<&str>)?;
+    let app_name = crate::edition::name();
+    let show = MenuItem::with_id(app, "show", tr!("打开 {app_name}", "Open {app_name}"), true, None::<&str>)?;
     let connect = MenuItem::with_id(app, "connect", tr!("连接", "Connect"), true, None::<&str>)?;
     let disconnect = MenuItem::with_id(app, "disconnect", tr!("断开", "Disconnect"), true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", tr!("退出", "Quit"), true, None::<&str>)?;
