@@ -12,12 +12,17 @@
 -->
 <body>
   <header class="topbar">
-    <div class="brand"><img id="brandCat" src="assets/cat-sleep.png" alt="" />Clash for Young</div>
+    <button type="button" class="brand" id="brandBtn" title="回到首页" data-en-title="Back to Home"><img id="brandCat" src="assets/cat-sleep.png" alt="" />Clash for Young</button>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-view="home" data-en="Home">首页</button>
       <button class="tab" data-view="sites" data-en="Sites">网站</button>
       <button class="tab" data-view="settings" data-en="Settings">设置</button>
     </nav>
+    <span class="spacer"></span>
+    <button type="button" class="ghost share-btn" id="shareBtn" title="复制下载链接，发给朋友" data-en-title="Copy the download link to send to friends">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v14"/></svg>
+      <span data-en="Share">分享</span>
+    </button>
   </header>
 
   <div id="toast" class="toast hidden"></div>

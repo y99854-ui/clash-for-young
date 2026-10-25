@@ -239,3 +239,9 @@ button.linklike { background: none; border: 0; padding: 0; color: var(--accent);
 .update-notes { margin-top: 6px; }
 .update-notes summary { cursor: pointer; color: var(--accent); }
 .update-notes pre { white-space: pre-wrap; font-family: inherit; font-size: 12px; margin: 6px 0 0; max-height: 220px; overflow: auto; }
+
+/* 左上角标题：点击回首页 */
+button.brand { background: none; border: 0; padding: 4px 6px; margin-left: -6px; border-radius: 6px; color: var(--text); cursor: pointer; }
+button.brand:hover { background: var(--chip); }
+/* 右上角分享 */
+.share-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; flex-shrink: 0; }

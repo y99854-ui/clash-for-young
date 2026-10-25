@@ -819,6 +819,38 @@ $("checkUpdateBtn").addEventListener("click", async () => {
   } catch (_) {}
 });
 
+// ───────── 左上角回首页 ─────────
+$("brandBtn").addEventListener("click", () => {
+  if (view === "welcome") return;
+  show("home");
+  render();
+  window.scrollTo(0, 0);
+});
+
+// ───────── 分享：复制下载链接（不含订阅链接） ─────────
+const DOWNLOAD_URL = "https://github.com/y99854-ui/clash-for-young/releases/latest";
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    // 部分系统的网页视图不允许直接写剪贴板，退回老办法
+    const t = document.createElement("textarea");
+    t.value = text;
+    t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t);
+    t.select();
+    const ok = document.execCommand("copy");
+    t.remove();
+    return ok;
+  }
+}
+$("shareBtn").addEventListener("click", async () => {
+  const text = DOWNLOAD_URL;
+  if (await copyText(text)) toast(L("已复制下载链接，粘贴发给朋友吧", "Download link copied. Paste it to a friend."));
+  else await askText(L("复制下面的链接发给朋友", "Copy this link and send it to a friend"), text);
+});
+
 // ───────── 语言 ─────────
 function renderLang() {
   $("langSelect").value = S.language || "";
