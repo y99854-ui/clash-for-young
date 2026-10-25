@@ -7,7 +7,9 @@
     "deps": "node scripts/fetch-deps.mjs",
     "tauri": "tauri",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "dev:research": "node scripts/research.mjs dev",
+    "build:research": "node scripts/research.mjs build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.0"

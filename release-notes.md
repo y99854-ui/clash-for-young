@@ -1,9 +1,5 @@
-## 分享和回到首页 · Share and back to Home
+## 小改进 · Minor update
 
-**中文**
-- 右上角新增「分享」按钮：一键复制下载链接，粘贴发给朋友就行（不含你的订阅链接）。
-- 点击左上角的「Clash for Young」可以从任何页面回到首页。
+**中文**：内部改进，为新的姊妹软件 Clash for Research（科研版）做准备，使用上没有变化。两个软件可以同时安装、互不影响。
 
-**English**
-- New “Share” button at the top right: one click copies the download link to send to friends (your subscription link is never included).
-- Click “Clash for Young” at the top left to go back to Home from any page.
+**English**: Internal improvements to prepare for the new sister app, Clash for Research. Nothing changes in use. Both apps can be installed side by side.
