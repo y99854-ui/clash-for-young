@@ -3,6 +3,7 @@
 
 #[macro_use]
 mod i18n;
+mod edition;
 mod app;
 mod check;
 mod configgen;
@@ -12,6 +13,7 @@ mod settings;
 mod sites;
 mod subscription;
 mod sysproxy_ctl;
+mod termproxy;
 mod tray;
 mod tun;
 mod updater;
@@ -102,6 +104,8 @@ fn main() {
             app::check_update,
             app::install_update,
             app::set_language,
+            app::set_campus_mode,
+            app::set_terminal_proxy,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")

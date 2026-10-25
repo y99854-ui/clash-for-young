@@ -7,6 +7,11 @@ use serde_yaml::{Mapping, Value};
 
 pub const GROUP_DEFAULT: &str = "默认地区";
 pub const GROUP_FASTEST: &str = "自动选择";
+/// 科研版：稳定线路。第一次测速选出最快的节点后就一直用它，只有它不通时才换，
+/// 适合 Google Scholar（频繁换 IP 容易触发人机验证）和下载大文件（中途换节点会断）
+pub const GROUP_STABLE: &str = "稳定线路";
+/// 稳定线路换节点的门槛：别的节点要快这么多毫秒才换，实际上等于不换
+const STABLE_TOLERANCE: u64 = 3000;
 const TEST_URL: &str = "https://www.gstatic.com/generate_204";
 
 /// 内网地址：始终直连
@@ -38,6 +43,7 @@ pub fn resolve_target(target: &str, parsed: &Parsed) -> Result<Option<String>, (
     let name = match t {
         "fastest" => GROUP_FASTEST.to_string(),
         "default" => GROUP_DEFAULT.to_string(),
+        "stable" if crate::edition::is_research() => GROUP_STABLE.to_string(),
         "DIRECT" | "REJECT" => t.to_string(),
         _ => {
             if let Some(r) = t.strip_prefix("region:") {
@@ -145,6 +151,9 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ])
     };
     groups.push(url_test(GROUP_FASTEST, all_nodes.clone()));
+    if crate::edition::is_research() {
+        groups.push(stable_group(&stable_nodes(st, parsed)));
+    }
     for r in &parsed.regions {
         groups.push(url_test(&r.name, r.nodes.clone()));
     }
@@ -152,6 +161,9 @@ pub fn generate(input: &GenInput) -> GenOutput {
     // ── 规则 ──
     let mut rules: Vec<String> = vec![];
     let global = st.global_mode;
+
+    // 校园网：学校订阅的数据库和出版社直连，用学校的 IP 认证下载全文
+    let campus = campus_active(st);
 
     // 全局模式：跳过自定义规则、网站选择和国内直连，除内网外全部走默认地区
     if !global {
@@ -167,11 +179,24 @@ pub fn generate(input: &GenInput) -> GenOutput {
             }
         }
 
-        // 2. 网站页的选择
+        // 2. 校园网直连（优先于网站页的选择）
+        if campus {
+            for site in input.sites.iter().filter(|s| s.campus) {
+                for d in site.domains.iter().filter_map(|d| clean_value(d)) {
+                    rules.push(format!("DOMAIN-SUFFIX,{d},DIRECT"));
+                }
+            }
+        }
+
+        // 3. 网站页的选择（没选过的用网站的默认走向）
         for site in input.sites {
-            let Some(choice) = st.site_choices.get(&site.id) else {
+            if campus && site.campus {
                 continue;
-            };
+            }
+            let choice = crate::sites::choice_of(st, site);
+            if choice.is_empty() {
+                continue;
+            }
             let t = match resolve_target(choice, parsed) {
                 Ok(Some(t)) => t,
                 Ok(None) => continue,
@@ -188,7 +213,7 @@ pub fn generate(input: &GenInput) -> GenOutput {
         }
     }
 
-    // 3. 内置：内网直连；规则模式下国内也直连，其余走默认地区
+    // 4. 内置：内网直连；规则模式下国内也直连，其余走默认地区
     rules.push("DOMAIN-SUFFIX,local,DIRECT".into());
     rules.push("DOMAIN-SUFFIX,localhost,DIRECT".into());
     for c in PRIVATE_CIDRS {
@@ -218,6 +243,14 @@ pub fn generate(input: &GenInput) -> GenOutput {
     // 全局模式下国内网站也经节点访问，用国外 DNS 解析才能拿到离节点近的地址
     if input.geo_ready && !global {
         policy.insert(s("geosite:cn,private"), seq(cn_dns.clone()));
+    }
+    // 校园网直连的网站用电脑自己的 DNS（校园网的 DNS）解析，拿到适合直连的地址
+    if campus && !global {
+        for site in input.sites.iter().filter(|s| s.campus) {
+            for d in site.domains.iter().filter_map(|d| clean_value(d)) {
+                policy.insert(s(&format!("+.{d}")), Value::from("system"));
+            }
+        }
     }
     let dns = map(vec![
         ("enable", Value::from(true)),
@@ -298,10 +331,46 @@ pub fn generate(input: &GenInput) -> GenOutput {
         ("rules", seq(rules)),
     ]);
     let yaml = format!(
-        "# 由 Clash for Young 自动生成，每次修改设置都会覆盖。请不要手动编辑。\n{}",
+        "# 由 {} 自动生成，每次修改设置都会覆盖。请不要手动编辑。\n{}",
+        crate::edition::name(),
         serde_yaml::to_string(&root).unwrap_or_default()
     );
     GenOutput { yaml, fallbacks }
+}
+
+/// 校园网直连是否生效（只有科研版有这个开关）
+pub fn campus_active(st: &Settings) -> bool {
+    crate::edition::is_research() && st.campus_mode
+}
+
+/// 稳定线路用哪些节点：跟着首页的默认地区走（选了某个分组就用这个分组的节点）
+pub fn stable_nodes(st: &Settings, parsed: &Parsed) -> Vec<String> {
+    let all = parsed.node_names();
+    let t = st.default_target.trim();
+    if let Some(r) = t.strip_prefix("region:") {
+        if let Some(region) = parsed.regions.iter().find(|x| x.name == r) {
+            if !region.nodes.is_empty() {
+                return region.nodes.clone();
+            }
+        }
+    } else if let Some(n) = t.strip_prefix("node:") {
+        if all.iter().any(|x| x == n) {
+            return vec![n.to_string()];
+        }
+    }
+    all
+}
+
+pub fn stable_group(nodes: &[String]) -> Value {
+    map(vec![
+        ("name", s(GROUP_STABLE)),
+        ("type", s("url-test")),
+        ("proxies", seq(nodes.to_vec())),
+        ("url", s(TEST_URL)),
+        ("interval", Value::from(600)),
+        ("tolerance", Value::from(STABLE_TOLERANCE)),
+        ("lazy", Value::from(false)),
+    ])
 }
 
 pub fn display_target(t: &str) -> String {
@@ -309,6 +378,7 @@ pub fn display_target(t: &str) -> String {
         "" => crate::tr!("自动", "Auto"),
         "fastest" => crate::tr!("自动（最快）", "Auto (fastest)"),
         "default" => crate::tr!("默认地区", "Default region"),
+        "stable" => crate::tr!("稳定线路", "Stable line"),
         "DIRECT" => crate::tr!("直连", "Direct"),
         "REJECT" => crate::tr!("拦截", "Block"),
         _ => t.strip_prefix("region:").or_else(|| t.strip_prefix("node:")).unwrap_or(t).to_string(),
@@ -427,6 +497,67 @@ proxies:
         if let Ok(p) = std::env::var("CFY_DUMP_GLOBAL") {
             std::fs::write(p, &out.yaml).unwrap();
         }
+    }
+
+    /// 科研版：稳定线路、默认走向、校园网直连。会切换全局的软件版本，单独运行：
+    /// cargo test research_ -- --ignored --test-threads=1
+    #[test]
+    #[ignore]
+    fn research_config() {
+        crate::edition::set_research_for_test(Some(true));
+        let parsed = sample();
+        let mut st = Settings::default();
+        st.default_target = "region:日本".into();
+        st.site_choices.insert("arxiv".into(), "".into()); // 用户把 arXiv 改成了“自动”
+        let sites = crate::sites::catalog(&st);
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false });
+        let v: Value = serde_yaml::from_str(&out.yaml).unwrap();
+        let groups = v["proxy-groups"].as_sequence().unwrap();
+        let stable = groups.iter().find(|g| g["name"].as_str() == Some(GROUP_STABLE)).expect("稳定线路");
+        assert_eq!(stable["proxies"].as_sequence().unwrap().len(), 1, "跟着默认地区（日本）");
+        assert_eq!(stable["tolerance"].as_u64(), Some(STABLE_TOLERANCE));
+        let rules: Vec<String> =
+            v["rules"].as_sequence().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        let pos = |r: &str| rules.iter().position(|x| x == r).unwrap_or_else(|| panic!("缺少 {r}"));
+        // 默认走稳定线路；Scholar 排在 Google 前面
+        assert!(pos("DOMAIN-SUFFIX,scholar.google.com,稳定线路") < rules.len());
+        assert!(rules.contains(&"DOMAIN-SUFFIX,huggingface.co,稳定线路".to_string()));
+        assert!(!rules.iter().any(|r| r.contains("arxiv.org")), "改成自动后不再单独写规则");
+        // 校园网关闭：出版社没有直连规则
+        assert!(!rules.iter().any(|r| r.contains("sciencedirect.com")));
+
+        st.campus_mode = true;
+        st.site_choices.insert("elsevier".into(), "region:日本".into()); // 校园网直连优先于用户的选择
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false });
+        let v: Value = serde_yaml::from_str(&out.yaml).unwrap();
+        let rules: Vec<String> =
+            v["rules"].as_sequence().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+        assert!(rules.contains(&"DOMAIN-SUFFIX,sciencedirect.com,DIRECT".to_string()));
+        assert!(rules.contains(&"DOMAIN-SUFFIX,ieee.org,DIRECT".to_string()));
+        assert!(!rules.iter().any(|r| r == "DOMAIN-SUFFIX,sciencedirect.com,日本"));
+        assert!(rules.contains(&"DOMAIN-SUFFIX,scholar.google.com,稳定线路".to_string()), "Scholar 仍走代理");
+        assert_eq!(v["dns"]["nameserver-policy"]["+.sciencedirect.com"].as_str(), Some("system"));
+        if let Ok(p) = std::env::var("CFY_DUMP_RESEARCH") {
+            std::fs::write(p, &out.yaml).unwrap();
+        }
+
+        // 全局模式：校园网直连也暂停
+        st.global_mode = true;
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false });
+        assert!(!out.yaml.contains("sciencedirect.com,DIRECT"));
+        crate::edition::set_research_for_test(None);
+    }
+
+    #[test]
+    fn young_has_no_research_parts() {
+        let parsed = sample();
+        let mut st = Settings::default();
+        st.campus_mode = true;
+        let sites = crate::sites::catalog(&st);
+        let out = generate(&GenInput { settings: &st, parsed: &parsed, sites: &sites, geo_ready: true, tun: false });
+        assert!(!out.yaml.contains(GROUP_STABLE));
+        assert!(!out.yaml.contains(",DIRECT\n- DOMAIN-SUFFIX,sciencedirect"));
+        assert!(resolve_target("stable", &parsed).is_err());
     }
 
     #[test]

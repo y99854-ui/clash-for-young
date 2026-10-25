@@ -187,11 +187,11 @@ impl AppState {
         let mut s = self.settings.lock().unwrap();
         let mut changed = false;
         if !core::port_free(s.mixed_port) {
-            s.mixed_port = core::pick_port(7899, s.controller_port);
+            s.mixed_port = core::pick_port(crate::edition::default_ports().0, s.controller_port);
             changed = true;
         }
         if !core::port_free(s.controller_port) {
-            s.controller_port = core::pick_port(9098, s.mixed_port);
+            s.controller_port = core::pick_port(crate::edition::default_ports().1, s.mixed_port);
             changed = true;
         }
         let snapshot = s.clone();
@@ -222,6 +222,11 @@ impl AppState {
         let port = self.settings.lock().unwrap().mixed_port;
         sysproxy_ctl::enable(&self.dir, port)?;
         self.connected.store(true, Ordering::SeqCst);
+        if self.terminal_proxy_on() {
+            if let Err(e) = crate::termproxy::enable(&self.dir, port) {
+                *self.core.last_error.lock().unwrap() = Some(e);
+            }
+        }
         self.settings.lock().unwrap().was_connected = true;
         self.save_settings()
     }
@@ -232,11 +237,17 @@ impl AppState {
         let was = self.connected.swap(false, Ordering::SeqCst);
         let r = if was || sysproxy_ctl::is_on(port) { sysproxy_ctl::disable(&self.dir, port) } else { Ok(()) };
         self.core.stop();
+        let _ = crate::termproxy::disable(&self.dir);
         if remember {
             self.settings.lock().unwrap().was_connected = false;
             let _ = self.save_settings();
         }
         r
+    }
+
+    /// 科研版的终端代理是否打开
+    fn terminal_proxy_on(&self) -> bool {
+        crate::edition::is_research() && self.settings.lock().unwrap().terminal_proxy
     }
 
     /// 增强模式是否真正生效（打开了且有权限）
@@ -417,6 +428,14 @@ pub struct StateView {
     pub language: String,
     /// 实际使用的语言："zh" / "en"
     pub lang: String,
+    /// "young" / "research"
+    pub edition: String,
+    pub app_name: String,
+    pub download_url: String,
+    /// 科研版：我在校园网
+    pub campus_mode: bool,
+    /// 科研版：终端代理
+    pub terminal_proxy: bool,
 }
 
 /// 本地开发时的版本号（界面显示为“开发版”）
@@ -436,7 +455,7 @@ fn state_view(app: &AppState) -> StateView {
             .fallbacks;
     let sites = sites
         .into_iter()
-        .map(|s| SiteView { choice: st.site_choices.get(&s.id).cloned().unwrap_or_default(), site: s })
+        .map(|s| SiteView { choice: sites::choice_of(&st, &s).to_string(), site: s })
         .collect();
     let running = app.core.is_running();
     StateView {
@@ -473,6 +492,11 @@ fn state_view(app: &AppState) -> StateView {
         update: crate::updater::available(),
         language: st.language.clone(),
         lang: crate::i18n::current().to_string(),
+        edition: crate::edition::id().to_string(),
+        app_name: crate::edition::name().to_string(),
+        download_url: crate::edition::download_url().to_string(),
+        campus_mode: st.campus_mode,
+        terminal_proxy: st.terminal_proxy,
     }
 }
 
@@ -585,6 +609,10 @@ pub async fn set_default_target(app: S<'_>, target: String) -> Result<StateView,
     app.write_config()?;
     if app.core.is_running() {
         let api = app.api();
+        // 科研版：稳定线路的节点跟着默认地区变，要重新加载配置
+        if crate::edition::is_research() {
+            app.core.reload(&api).await?;
+        }
         let resolved = {
             let parsed = app.parsed.lock().unwrap();
             configgen::resolve_target(&target, &parsed).ok().flatten()
@@ -608,6 +636,36 @@ pub fn set_language(app: S, handle: tauri::AppHandle, language: String) -> Resul
     app.settings.lock().unwrap().language = language;
     app.save_settings()?;
     crate::tray::relabel(&handle);
+    Ok(state_view(&app))
+}
+
+/// 科研版：我在校园网（出版社、数据库直连）
+#[tauri::command]
+pub async fn set_campus_mode(app: S<'_>, on: bool) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.settings.lock().unwrap().campus_mode = on;
+    app.save_settings()?;
+    let domains: Vec<String> = {
+        let st = app.settings.lock().unwrap();
+        sites::catalog(&st).into_iter().filter(|s| s.campus).flat_map(|s| s.domains).collect()
+    };
+    app.apply(&domains).await?;
+    Ok(state_view(&app))
+}
+
+/// 科研版：终端代理。连接中立即生效
+#[tauri::command]
+pub async fn set_terminal_proxy(app: S<'_>, on: bool) -> Result<StateView, String> {
+    let _g = app.op.lock().await;
+    app.settings.lock().unwrap().terminal_proxy = on;
+    app.save_settings()?;
+    let connected = app.connected.load(Ordering::SeqCst) && app.core.is_running();
+    let port = app.settings.lock().unwrap().mixed_port;
+    if on && connected {
+        crate::termproxy::enable(&app.dir, port)?;
+    } else {
+        crate::termproxy::disable(&app.dir)?;
+    }
     Ok(state_view(&app))
 }
 
@@ -644,12 +702,15 @@ pub async fn set_site_choice(app: S<'_>, id: String, target: String) -> Result<S
     let _g = app.op.lock().await;
     let domains = {
         let mut s = app.settings.lock().unwrap();
-        if target.is_empty() {
+        let site = sites::catalog(&s).into_iter().find(|x| x.id == id);
+        let default = site.as_ref().map(|x| x.default_choice.clone()).unwrap_or_default();
+        // 和默认一样就不记录（以后默认改了也跟着变）；“自动”但默认不是自动时要记下来
+        if target == default {
             s.site_choices.remove(&id);
         } else {
             s.site_choices.insert(id.clone(), target);
         }
-        sites::catalog(&s).into_iter().find(|x| x.id == id).map(|x| x.domains).unwrap_or_default()
+        site.map(|x| x.domains).unwrap_or_default()
     };
     app.save_settings()?;
     app.apply(&domains).await?;
@@ -991,6 +1052,8 @@ pub struct Status {
     pub flag: String,
     pub delay: Option<u64>,
     pub error: Option<String>,
+    /// 科研版：稳定线路现在用的节点
+    pub stable: String,
 }
 
 #[tauri::command]
@@ -1021,6 +1084,9 @@ pub async fn status(app: S<'_>, with_delay: bool) -> Result<Status, String> {
         cur = next;
     }
     st.node = cur.clone();
+    if crate::edition::is_research() {
+        st.stable = check::str_of(&pmap[configgen::GROUP_STABLE], "now");
+    }
     if cur == "DIRECT" {
         st.region = tr!("直连", "Direct");
     } else if let Some(r) = app.parsed.lock().unwrap().region_of(&cur) {
@@ -1084,7 +1150,8 @@ pub fn export_mobile_config(app: S, handle: tauri::AppHandle) -> Result<String, 
         texts: &texts,
     })?;
     let dir = handle.path().download_dir().unwrap_or_else(|_| app.dir.clone());
-    let path = dir.join(tr!("Clash for Young 手机配置.yaml", "Clash for Young mobile config.yaml"));
+    let app_name = crate::edition::name();
+    let path = dir.join(tr!("{app_name} 手机配置.yaml", "{app_name} mobile config.yaml"));
     std::fs::write(&path, yaml).map_err(|e| tr!("无法保存文件：{e}", "Can't save the file: {e}"))?;
     reveal(&path);
     Ok(path.to_string_lossy().to_string())
@@ -1133,6 +1200,8 @@ pub async fn on_startup(app: &AppState) {
     // 上次被强制结束时留下的内核（会让增强模式断网）
     app.core.kill_leftovers();
     sysproxy_ctl::recover_on_startup(&app.dir, port);
+    // 上次没来得及撤销的终端代理（崩溃、强制退出）
+    let _ = crate::termproxy::disable(&app.dir);
     // 刚自动更新完：更新前是连着的，就自动连上（平时打开软件不会自动连接）
     let resume = std::mem::take(&mut app.settings.lock().unwrap().resume_after_update);
     if resume {
@@ -1166,6 +1235,46 @@ mod e2e {
             .iter()
             .map(|r| format!("{},{},{}", r["type"].as_str().unwrap(), r["payload"].as_str().unwrap(), r["proxy"].as_str().unwrap()))
             .collect()
+    }
+
+    /// 科研版：内核里有稳定线路；运行中打开校园网，出版社立即改成直连（只需要 CFY_MIHOMO、CFY_GEO）
+    /// cargo test research_live -- --ignored --test-threads=1
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn research_live() {
+        crate::edition::set_research_for_test(Some(true));
+        let dir = std::env::temp_dir().join(format!("cfy-research-{}", settings::now_ms()));
+        let geo = std::env::var("CFY_GEO").ok().map(PathBuf::from);
+        let app = AppState::new(dir.clone(), geo);
+        {
+            let mut s = app.settings.lock().unwrap();
+            assert_eq!((s.mixed_port, s.controller_port), (7900, 9099), "科研版默认端口");
+            s.mixed_port = 18900;
+            s.controller_port = 19199;
+        }
+        app.import_file_sub(
+            "t.yaml",
+            "proxies:\n  - {name: \"美国 01\", type: socks5, server: 127.0.0.1, port: 1080}\n  - {name: \"美国 02\", type: socks5, server: 127.0.0.1, port: 1081}\n",
+        )
+        .unwrap();
+        app.reparse();
+        app.start_core().await.unwrap();
+        let api = app.api();
+        let proxies = check::api_get(&api, "/proxies").await.unwrap();
+        assert_eq!(proxies["proxies"][configgen::GROUP_STABLE]["type"].as_str(), Some("URLTest"));
+        let rules = live_rules(&app).await;
+        assert!(rules.iter().any(|r| r == "DomainSuffix,scholar.google.com,稳定线路"), "{rules:?}");
+        assert!(!rules.iter().any(|r| r.contains("sciencedirect.com")));
+
+        app.settings.lock().unwrap().campus_mode = true;
+        app.apply(&[]).await.unwrap();
+        let rules = live_rules(&app).await;
+        assert!(rules.iter().any(|r| r == "DomainSuffix,sciencedirect.com,DIRECT"));
+        assert!(rules.iter().any(|r| r == "DomainSuffix,scholar.google.com,稳定线路"));
+        println!("校园网开启后内核规则（前 12 条）：{:#?}", &rules[..12.min(rules.len())]);
+        app.core.stop();
+        let _ = std::fs::remove_dir_all(dir);
+        crate::edition::set_research_for_test(None);
     }
 
     /// 运行中切换全局 / 规则，内核实际加载的规则跟着变（只需要 CFY_MIHOMO）

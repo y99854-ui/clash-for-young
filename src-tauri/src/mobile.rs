@@ -5,7 +5,7 @@
 //! - 从文件导入的订阅没有链接，节点直接写进配置
 //! - 规则和电脑上完全一样（直接取电脑配置生成的规则）
 
-use crate::configgen::{self, GenInput, GROUP_DEFAULT, GROUP_FASTEST};
+use crate::configgen::{self, GenInput, GROUP_DEFAULT, GROUP_FASTEST, GROUP_STABLE};
 use crate::settings::{NodeGroup, Settings};
 use crate::sites::Site;
 use crate::subscription::{self, Parsed, Tagged, OTHER_REGION};
@@ -170,6 +170,16 @@ pub fn generate(input: &MobileInput) -> Result<String, String> {
     // 自动选择：全部节点
     groups.push(url_test(GROUP_FASTEST, inline.iter().map(|t| t.name()).collect(), None, info.clone()));
 
+    // 科研版：稳定线路（手机上用全部节点，选出最快的之后就不再换）
+    if crate::edition::is_research() {
+        let mut g = url_test(GROUP_STABLE, inline.iter().map(|t| t.name()).collect(), None, info.clone());
+        if let Value::Mapping(m) = &mut g {
+            m.insert(s("tolerance"), Value::from(3000));
+            m.insert(s("interval"), Value::from(600));
+        }
+        groups.push(g);
+    }
+
     // 各分组
     let all_regex: Vec<String> = defs.iter().filter_map(subscription::group_regex).collect();
     for r in &parsed.regions {
@@ -254,10 +264,11 @@ pub fn generate(input: &MobileInput) -> Result<String, String> {
     if crate::i18n::is_en() {
         english_names(&mut root);
     }
+    let app = crate::edition::name();
     let header = crate::tr!(
-        "# Clash for Young 导出的手机配置。里面有你的订阅链接，请不要发给别人。\n\
+        "# {app} 导出的手机配置。里面有你的订阅链接，请不要发给别人。\n\
          # 适用：Clash Mi（iPhone）、Clash Meta for Android、FlClash 等 mihomo 内核的软件。\n",
-        "# Mobile config exported by Clash for Young. It contains your subscription link, so don't share it.\n\
+        "# Mobile config exported by {app}. It contains your subscription link, so don't share it.\n\
          # Works with mihomo-based apps such as Clash Mi (iPhone), Clash Meta for Android and FlClash.\n"
     );
     Ok(format!("{header}{}", serde_yaml::to_string(&Value::Mapping(root)).map_err(|e| e.to_string())?))
@@ -272,6 +283,8 @@ fn english_names(root: &mut Mapping) {
             Some("Auto (fastest)".into())
         } else if n == OTHER_REGION {
             Some("Other".into())
+        } else if n == GROUP_STABLE {
+            Some("Stable line".into())
         } else {
             n.strip_prefix(NODE_PREFIX).map(|x| format!("Node · {x}"))
         }

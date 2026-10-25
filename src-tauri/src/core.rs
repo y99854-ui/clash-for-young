@@ -96,11 +96,12 @@ impl Core {
 
     fn spawn(&self) -> Result<(), String> {
         let over = self.launch_override.lock().unwrap().clone();
+        let app = crate::edition::name();
         let bin = over.or_else(|| self.binary.clone()).ok_or_else(|| {
             if cfg!(windows) {
-                tr!("找不到代理内核文件 mihomo.exe。可能被杀毒软件删除了：请在杀毒软件里恢复它并加入白名单，或重新安装 Clash for Young。", "Can't find the proxy core file mihomo.exe. Your antivirus may have removed it: restore it and add it to the allow list, or reinstall Clash for Young.")
+                tr!("找不到代理内核文件 mihomo.exe。可能被杀毒软件删除了：请在杀毒软件里恢复它并加入白名单，或重新安装 {app}。", "Can't find the proxy core file mihomo.exe. Your antivirus may have removed it: restore it and add it to the allow list, or reinstall {app}.")
             } else {
-                tr!("找不到代理内核文件 mihomo，请重新安装 Clash for Young。", "Can't find the proxy core file mihomo. Please reinstall Clash for Young.")
+                tr!("找不到代理内核文件 mihomo，请重新安装 {app}。", "Can't find the proxy core file mihomo. Please reinstall {app}.")
             }
         })?;
         // 上次软件被强制结束（崩溃、强制退出）时留下的内核还在运行：它占着端口和增强模式的路由，
@@ -120,7 +121,7 @@ impl Core {
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不弹黑色命令行窗口
         let child = cmd.spawn().map_err(|e| {
             if cfg!(windows) {
-                tr!("无法启动代理内核：{e}。如果装了杀毒软件，请把 Clash for Young 的安装目录加入白名单。", "Can't start the proxy core: {e}. If you have antivirus software, add the Clash for Young install folder to its allow list.")
+                tr!("无法启动代理内核：{e}。如果装了杀毒软件，请把 {app} 的安装目录加入白名单。", "Can't start the proxy core: {e}. If you have antivirus software, add the {app} install folder to its allow list.")
             } else {
                 tr!("无法启动代理内核：{e}", "Can't start the proxy core: {e}")
             }
