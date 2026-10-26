@@ -1051,6 +1051,8 @@ pub struct Status {
     pub region: String,
     pub flag: String,
     pub delay: Option<u64>,
+    /// 测了延迟但节点没响应（超时或连不上）
+    pub delay_failed: bool,
     pub error: Option<String>,
     /// 科研版：稳定线路现在用的节点
     pub stable: String,
@@ -1100,6 +1102,7 @@ pub async fn status(app: S<'_>, with_delay: bool) -> Result<Status, String> {
             urlencoding::encode("https://www.gstatic.com/generate_204")
         );
         st.delay = check::api_get(&api, &path).await.ok().and_then(|v| v["delay"].as_u64());
+        st.delay_failed = st.delay.is_none();
     }
     Ok(st)
 }
