@@ -1,15 +1,11 @@
-## Clash for Research 第一版 · First release
+## 节点连不上时会提醒 · Alert when the node isn't working
 
 **中文**
-Clash for Research 是 Clash for Young 的科研版，针对查文献、下载数据、写论文做了优化：
-- **学术网站预设**：Google Scholar、arXiv、PubMed、Web of Science、各大出版社、GitHub、Hugging Face、Overleaf、Zotero 等，已经分好类。
-- **我在校园网**：打开后出版社和数据库直连，用学校的订阅下载全文；Google Scholar 仍走代理。
-- **稳定线路**：Google Scholar 和下载类网站固定用一个节点，不容易触发人机验证，下载不会中途断。
-- **终端代理**：连接时新打开的终端自动走代理（git、pip、conda、Hugging Face 等），断开时自动撤销。
+- 首页当前节点后面新增红点：节点 5 秒内没有响应，或延迟超过 1000 ms 时出现。点一下可以看到是「无法连接」还是「延迟过高」，以及怎么换节点。
+- 「设置 → 高级 → 节点列表」测速时，超时的节点显示为红色。
+- 小提示：如果一个订阅的节点全部超时，可能是机场的服务器出了问题，或者你所在的网络（比如校园网）连不上它，可以联系机场确认。建议同时添加两个订阅，「默认地区」选「自动（最快）」，就会自动避开连不上的节点。
 
 **English**
-Clash for Research is the research edition of Clash for Young, tuned for literature search, data downloads and writing:
-- **Academic site presets**: Google Scholar, arXiv, PubMed, Web of Science, major publishers, GitHub, Hugging Face, Overleaf, Zotero and more, already grouped.
-- **Campus network switch**: publishers and databases go direct so your school's subscriptions work; Google Scholar still uses the proxy.
-- **Stable line**: Google Scholar and download sites stick to one node, so fewer CAPTCHAs and no broken downloads.
-- **Terminal proxy**: while connected, new terminals use the proxy (git, pip, conda, Hugging Face…); it's undone when you disconnect.
+- A red dot now appears next to the current node on the Home page when it doesn't respond within 5 seconds or its latency is over 1000 ms. Click it to see whether it's "Can't connect" or "High latency" and how to switch nodes.
+- Timed-out nodes now show in red when you test them in Settings → Advanced → Node list.
+- Tip: if every node from one subscription times out, the provider's servers may be down, or your network (such as a campus network) can't reach them; check with your provider. Adding a second subscription and setting Default region to "Auto (fastest)" skips nodes that can't connect.
