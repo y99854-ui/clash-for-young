@@ -257,3 +257,8 @@ body.edition-research .seg button.active { color: #fff; }
 .campus-tag { font-size: 10px; color: var(--good); border: 1px solid var(--good); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
 .site-row select:disabled { opacity: .55; }
 .copy-row { flex-wrap: wrap; }
+
+/* 首页：当前节点连不上或延迟过高时的红点，点开显示说明 */
+button.delay-dot { display: inline-block; width: 10px; height: 10px; padding: 0; margin-left: 8px; border: none; border-radius: 50%; background: var(--slow); vertical-align: middle; cursor: pointer; box-shadow: 0 0 0 3px color-mix(in srgb, var(--slow) 22%, transparent); }
+button.delay-dot:hover { filter: brightness(1.1); }
+.delay-warn { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--slow); }

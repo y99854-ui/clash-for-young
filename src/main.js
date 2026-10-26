@@ -90,6 +90,8 @@ function fmtAgo(ms) {
   if (m < 60 * 24) return L(`${Math.round(m / 60)} 小时前`, `${Math.round(m / 60)} h ago`);
   return L(`${Math.round(m / 1440)} 天前`, `${Math.round(m / 1440)} days ago`);
 }
+const SLOW_MS = 1000; // 超过这个延迟就标红点
+let delayWarnOpen = false; // 首页红点的说明是否展开
 function delayClass(d) { return d == null ? "" : d < 300 ? "delay-good" : d < 800 ? "delay-mid" : "delay-slow"; }
 
 // ───────── 走向下拉框 ─────────
@@ -170,11 +172,16 @@ function renderHome() {
   if (on && status) {
     if (status.node === "DIRECT") now = L("全部直连", "All direct");
     else if (status.node) {
-      const d = status.delay != null ? ` · <span class="${delayClass(status.delay)}">${status.delay} ms</span>` : "";
+      let d = status.delay != null ? ` · <span class="${delayClass(status.delay)}">${status.delay} ms</span>` : "";
+      if (delayProblem()) d += `<button id="delayDot" class="delay-dot" title="${L("点击查看", "Click for details")}" aria-label="${L("延迟问题", "Latency problem")}"></button>`;
       now = `${esc(dn(status.region))} · ${esc(status.node)}${d}`;
     }
   } else if (!on) now = L("小猫在睡觉，点它开始上网", "The cat is asleep. Click it to get online.");
   $("nowText").innerHTML = now;
+  const problem = on && delayProblem();
+  if (!problem) delayWarnOpen = false;
+  $("delayWarn").classList.toggle("hidden", !(problem && delayWarnOpen));
+  if (problem) $("delayWarn").textContent = delayWarnText();
   const showStable = isResearch() && on && status && status.stable;
   $("stableText").classList.toggle("hidden", !showStable);
   if (showStable) $("stableText").textContent = L(`稳定线路（Scholar、下载）· ${status.stable}`, `Stable line (Scholar, downloads) · ${status.stable}`);
@@ -197,6 +204,22 @@ function renderHome() {
     return `<div class="home-sub"><div class="line"><span><b>${esc(sub.name)}</b> · ${nodesText(sub.nodeCount)}</span><span>${esc(right.join(" · "))}</span></div>${bar}</div>`;
   }).join("");
 }
+
+// 当前节点连不上，或延迟超过 SLOW_MS
+function delayProblem() {
+  return !!status && !!status.node && status.node !== "DIRECT" && (status.delayFailed || (status.delay != null && status.delay > SLOW_MS));
+}
+function delayWarnText() {
+  const tip = L("可以在下面的「默认地区」换一个地区或节点，或到「设置 → 高级 → 节点列表」测速看看哪些节点能用。",
+    "Try another region or node under Default region below, or test all nodes in Settings → Advanced → Node list.");
+  if (status.delayFailed) return L("无法连接：这个节点 5 秒内没有响应，现在可能上不了网。", "Can't connect: this node didn't respond within 5 seconds, so you may be offline.") + tip;
+  return L(`延迟过高：${status.delay} ms，网页打开会明显变慢。`, `High latency: ${status.delay} ms, so pages will load slowly.`) + tip;
+}
+$("nowText").addEventListener("click", (e) => {
+  if (e.target.id !== "delayDot") return;
+  delayWarnOpen = !delayWarnOpen;
+  renderHome();
+});
 
 const nodesText = (n) => L(`${n} 个节点`, n === 1 ? "1 node" : `${n} nodes`);
 const subsCount = (subs, nodes) => L(`${subs} 个订阅 · 共 ${nodes} 个节点`, `${subs} subscription${subs === 1 ? "" : "s"} · ${nodes} nodes`);
@@ -316,7 +339,8 @@ function renderNodes() {
       <div class="node-grid">${r.nodes.map((n) => {
         const d = delays[n];
         const txt = d == null ? (Object.keys(delays).length ? L("超时", "timeout") : "") : d + " ms";
-        return `<div class="node-item"><span class="n" title="${esc(n)}">${esc(n)}</span><span class="${delayClass(d)}">${txt}</span></div>`;
+        const cls = d == null && Object.keys(delays).length ? "delay-slow" : delayClass(d);
+        return `<div class="node-item"><span class="n" title="${esc(n)}">${esc(n)}</span><span class="${cls}">${txt}</span></div>`;
       }).join("")}</div></div>`)
     .join("");
 }
@@ -374,7 +398,7 @@ async function pollStatus() {
   try {
     const withDelay = tick % 6 === 1;
     const st = await invoke("status", { withDelay });
-    if (!withDelay && status && st.node === status.node) st.delay = status.delay;
+    if (!withDelay && status && st.node === status.node) { st.delay = status.delay; st.delayFailed = status.delayFailed; }
     status = st;
     if (S && (S.connected !== st.connected || S.running !== st.running)) await refreshState();
     else if (S) renderHome();
