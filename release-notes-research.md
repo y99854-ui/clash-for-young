@@ -1,11 +1,9 @@
-## 订阅更新间隔可调 · Adjustable subscription update interval
+## 彩蛋升级 · Easter egg upgrade
 
 **中文**
-- 「设置 → 订阅」新增自动更新间隔：每 6 小时、每 12 小时、每天（默认）、每 2 天、每周，或者只手动更新。之前固定每 6 小时更新一次，现在默认改为每天一次，减少对机场的请求。
-- 导出给手机的配置，订阅更新间隔也跟随这个设置。
-- 藏了一个小彩蛋，等你来发现 🐱
+- 上一版藏的小彩蛋升级了：这次的小猫会冲出软件窗口，在整个屏幕上撒欢 🐱 还没找到的话，试试多点几下软件里的某个地方。
+- 小猫只是在屏幕上画出来的，鼠标点击会直接穿过去，不影响你用电脑。
 
 **English**
-- New auto-update interval in Settings → Subscriptions: every 6 hours, every 12 hours, daily (default), every 2 days, weekly, or manual only. It used to be fixed at every 6 hours; the default is now once a day, which means fewer requests to your provider.
-- Configs exported for your phone follow the same interval.
-- There's a little easter egg hidden somewhere 🐱
+- The little easter egg from last time got an upgrade: the cats now burst out of the app window and bounce around your whole screen 🐱 Haven't found it yet? Try tapping a certain spot in the app a few times.
+- The cats are only drawn on top of the screen. Clicks pass straight through, so they won't get in the way.
