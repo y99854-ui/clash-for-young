@@ -262,3 +262,7 @@ body.edition-research .seg button.active { color: #fff; }
 button.delay-dot { display: inline-block; width: 10px; height: 10px; padding: 0; margin-left: 8px; border: none; border-radius: 50%; background: var(--slow); vertical-align: middle; cursor: pointer; box-shadow: 0 0 0 3px color-mix(in srgb, var(--slow) 22%, transparent); }
 button.delay-dot:hover { filter: brightness(1.1); }
 .delay-warn { margin-top: 6px; font-size: 13px; line-height: 1.5; color: var(--slow); }
+
+/* 彩蛋：掉落的小猫，盖在最上层但不挡点击 */
+#catRain { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 9999; }
+#catRain img { position: absolute; left: 0; top: 0; image-rendering: pixelated; will-change: transform; }

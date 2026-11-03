@@ -129,14 +129,25 @@
   <main id="view-settings" class="hidden">
     <details class="card fold" id="subsBox">
       <summary><span class="fold-title" data-en="Subscriptions">订阅</span><span id="subsSummary" class="muted small"></span></summary>
-      <p class="muted small" data-en="You can add several subscriptions; their nodes are combined and grouped together. Link subscriptions update every 6 hours; subscriptions imported from a file don't update.">可以添加多个订阅，所有订阅的节点合在一起使用、一起分组。链接订阅每 6 小时自动更新；从文件导入的订阅不会自动更新。</p>
+      <p class="muted small" data-en="You can add several subscriptions; their nodes are combined and grouped together. Link subscriptions update automatically at the interval below; subscriptions imported from a file don't update.">可以添加多个订阅，所有订阅的节点合在一起使用、一起分组。链接订阅按下面的间隔自动更新；从文件导入的订阅不会自动更新。</p>
       <div id="subsList" class="subs-list"></div>
       <form id="subForm" class="row">
         <input id="subUrl" placeholder="粘贴订阅链接 https://…" data-en-placeholder="Paste a subscription link https://…" autocomplete="off" spellcheck="false" />
         <button type="submit" data-en="Add link">添加链接</button>
         <button type="button" id="subFileBtn" class="ghost" data-en="Import from file">从文件导入</button>
       </form>
-      <div class="row actions"><span class="spacer"></span><button type="button" id="refreshAllBtn" class="ghost small-btn" data-en="Update all">全部更新</button></div>
+      <div class="row actions">
+        <span class="muted small" data-en="Auto update">自动更新</span>
+        <select id="subIntervalSelect" class="narrow-input">
+          <option value="6" data-en="Every 6 hours">每 6 小时</option>
+          <option value="12" data-en="Every 12 hours">每 12 小时</option>
+          <option value="24" data-en="Every day">每天</option>
+          <option value="48" data-en="Every 2 days">每 2 天</option>
+          <option value="168" data-en="Every week">每周</option>
+          <option value="0" data-en="Manual only">只手动更新</option>
+        </select>
+        <span class="spacer"></span><button type="button" id="refreshAllBtn" class="ghost small-btn" data-en="Update all">全部更新</button>
+      </div>
     </details>
 
     <details class="card fold" id="groupsBox">
