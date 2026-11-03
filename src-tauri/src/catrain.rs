@@ -42,8 +42,10 @@ fn overlay(app: &AppHandle) -> Result<WebviewWindow, String> {
 }
 
 /// 主窗口喷一批小猫。x、y 是传送门中心在主窗口网页里的位置。
+/// 返回小猫窗口是否已经加载好，主窗口据此判断要不要退回在本窗口里喷。
+/// 必须是 async：Windows 上在同步命令里新建窗口会卡死（Tauri 已知问题 #4121）。
 #[tauri::command]
-pub fn cat_spawn(app: AppHandle, window: WebviewWindow, x: f64, y: f64, n: u32) -> Result<(), String> {
+pub async fn cat_spawn(app: AppHandle, window: WebviewWindow, x: f64, y: f64, n: u32) -> Result<bool, String> {
     let err = |e: tauri::Error| e.to_string();
     // 主窗口网页坐标 → 屏幕上的物理像素
     let scale = window.scale_factor().map_err(err)?;
@@ -72,12 +74,13 @@ pub fn cat_spawn(app: AppHandle, window: WebviewWindow, x: f64, y: f64, n: u32) 
     }
 
     let s = Spawn { x: (px - mpos.x as f64) / mscale, y: (py - mpos.y as f64) / mscale, n: n.min(10) };
-    if READY.load(Ordering::SeqCst) {
+    let ready = READY.load(Ordering::SeqCst);
+    if ready {
         app.emit_to(LABEL, "cat-spawn", s).map_err(err)?;
     } else {
         PENDING.lock().unwrap().push(s);
     }
-    Ok(())
+    Ok(ready)
 }
 
 /// 小猫窗口加载好了：领走之前攒下的小猫
@@ -90,6 +93,7 @@ pub fn cat_overlay_ready() -> Vec<Spawn> {
 /// 小猫都消失了：收起小猫窗口（不关闭，下次直接用）
 #[tauri::command]
 pub fn cat_overlay_done(app: AppHandle) {
+    PENDING.lock().unwrap().clear();
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.hide();
     }
