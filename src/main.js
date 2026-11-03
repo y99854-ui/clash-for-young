@@ -917,7 +917,7 @@ $("brandBtn").addEventListener("click", () => {
   window.scrollTo(0, 0);
 });
 
-// ───────── 彩蛋：1.5 秒内连点 4 次左上角的软件名，小猫开关里喷出各种颜色的小猫 ─────────
+// ───────── 彩蛋：1.5 秒内连点 4 次左上角的软件名，开关变成传送门，喷出各种颜色的小猫，飞出窗口在屏幕边上反弹 ─────────
 let brandTaps = [];
 function catRainTap() {
   const now = Date.now();
@@ -929,92 +929,71 @@ function catRainTap() {
   }
 }
 
-// 小猫本身是深灰色，滤镜调不出颜色：在画布上把灰色的身体换成别的颜色，粉色脸颊和绿色眼睛保留
-let catColors = null;
-async function makeCatColors() {
-  const img = new Image();
-  img.src = "assets/cat-awake.png";
-  await img.decode();
-  const w = img.naturalWidth, h = img.naturalHeight;
-  const base = document.createElement("canvas");
-  base.width = w; base.height = h;
-  const bctx = base.getContext("2d");
-  bctx.drawImage(img, 0, 0);
-  const src = bctx.getImageData(0, 0, w, h);
-  const hues = [0, 25, 45, 90, 140, 175, 200, 225, 265, 300, 330];
-  const out = [img.src]; // 也保留原来的灰猫
-  for (const hue of hues) {
-    const d = new Uint8ClampedArray(src.data);
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] === 0) continue;
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      if (max - min > 24) continue; // 有颜色的像素（眼睛、脸颊）不动
-      // 灰度 → 同一色相的深浅：越暗的地方颜色越深，保留像素画的明暗层次
-      const l = 0.32 + (max / 255) * 0.75;
-      const [nr, ng, nb] = hslToRgb(hue / 360, 0.7, Math.min(l, 0.85));
-      d[i] = nr; d[i + 1] = ng; d[i + 2] = nb;
-    }
-    const c = document.createElement("canvas");
-    c.width = w; c.height = h;
-    c.getContext("2d").putImageData(new ImageData(d, w, h), 0, 0);
-    out.push(c.toDataURL());
-  }
-  return out;
-}
-function hslToRgb(h, s, l) {
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
-  const f = (t) => {
-    t = (t + 1) % 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  return [f(h + 1 / 3), f(h), f(h - 1 / 3)].map((v) => Math.round(v * 255));
-}
+let catColors = null; // makeCatColors 在 cats.js 里
 
 let catRainUntil = 0;
-// 喷泉的发射点：首页的小猫开关；不在首页（看不到开关）时用左上角的小猫
+// 小猫优先交给全屏的小猫窗口画，能飞出软件窗口；那个窗口开不起来时退回在本窗口里喷
+let catOverlayOk = true;
+async function catRain() {
+  if (!catColors) {
+    try { catColors = await makeCatColors(); } catch (_) { catColors = ["assets/cat-awake.png"]; }
+  }
+  const running = Date.now() < catRainUntil;
+  catRainUntil = Date.now() + 8000; // 再连点 4 次会延长
+  if (running) return;
+  document.querySelectorAll(".power").forEach((b) => b.classList.add("portal-open"));
+  const tick = async () => {
+    if (Date.now() > catRainUntil) {
+      document.querySelectorAll(".power").forEach((b) => b.classList.remove("portal-open"));
+      return;
+    }
+    const src = catSource();
+    if (src) {
+      const r = src.r;
+      src.pulse.animate(
+        [{ transform: "scale(1)" }, { transform: "scale(1.14, 0.88)" }, { transform: "scale(1)" }],
+        { duration: 150, easing: "ease-out" },
+      );
+      if (catOverlayOk) {
+        try {
+          await window.__TAURI__.core.invoke("cat_spawn", { x: r.left + r.width / 2, y: r.top + r.height / 2, n: 3 });
+        } catch (e) {
+          catOverlayOk = false;
+          console.warn("小猫窗口不可用，改在本窗口里喷", e);
+        }
+      }
+      if (!catOverlayOk) {
+        let layer = $("catRain");
+        if (!layer) {
+          layer = document.createElement("div");
+          layer.id = "catRain";
+          document.body.appendChild(layer);
+        }
+        for (let k = 0; k < 3; k++) sprayCat(layer, r);
+        if (!catFrame) catFrame = requestAnimationFrame(stepCats);
+      }
+    }
+    setTimeout(tick, 150);
+  };
+  tick();
+}
+// 喷出点：首页开关上的传送门；看不到开关时用左上角的小猫
 function catSource() {
-  for (const id of ["catImg", "brandCat"]) {
-    const el = $(id);
-    if (!el) continue;
+  const portal = document.querySelector("#powerBtn .portal");
+  const btn = $("powerBtn");
+  if (portal && btn) {
+    const r = portal.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) return { r, pulse: portal };
+  }
+  const el = $("brandCat");
+  if (el) {
     const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) return { el, r };
+    if (r.width > 0 && r.height > 0) return { r, pulse: el };
   }
   return null;
 }
 let catParticles = [];
 let catFrame = 0;
-async function catRain() {
-  if (!catColors) {
-    try { catColors = await makeCatColors(); } catch (_) { catColors = ["assets/cat-awake.png"]; }
-  }
-  let layer = $("catRain");
-  if (!layer) {
-    layer = document.createElement("div");
-    layer.id = "catRain";
-    document.body.appendChild(layer);
-  }
-  const running = Date.now() < catRainUntil;
-  catRainUntil = Date.now() + 8000; // 再连点 4 次会延长
-  if (running) return;
-  const tick = () => {
-    if (Date.now() > catRainUntil) return;
-    const src = catSource();
-    if (src) {
-      for (let k = 0; k < 3; k++) sprayCat(layer, src.r);
-      src.el.animate(
-        [{ transform: "scale(1)" }, { transform: "scale(1.12, 0.9)" }, { transform: "scale(1)" }],
-        { duration: 150, easing: "ease-out" },
-      );
-    }
-    setTimeout(tick, 150);
-  };
-  tick();
-  if (!catFrame) catFrame = requestAnimationFrame(stepCats);
-}
 function sprayCat(layer, r) {
   const cat = document.createElement("img");
   cat.src = catColors[Math.floor(Math.random() * catColors.length)];

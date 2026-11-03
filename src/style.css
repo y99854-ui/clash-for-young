@@ -110,7 +110,21 @@ button.danger { color: var(--slow); }
   background: linear-gradient(#464f6e, #262c42); border: 3px solid var(--border); transition: all .2s;
   display: grid; place-items: center;
 }
-.power img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.power img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; transition: opacity .25s, transform .3s; }
+/* 彩蛋：开关变成旋转的彩虹传送门，小猫从门里喷出来 */
+.power { position: relative; }
+.power .portal { position: absolute; inset: 12px; display: grid; place-items: center; pointer-events: none; opacity: 0; transform: scale(.15); transition: opacity .25s, transform .4s cubic-bezier(.3, 1.6, .5, 1); }
+.power .portal i { position: absolute; inset: 0; border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, #ff5f8f 0 30deg, #ffb347 30deg 60deg, #ffe66d 60deg 90deg, #7cf29a 90deg 120deg, #5ad8ff 120deg 150deg, #8b7bff 150deg 180deg);
+  box-shadow: 0 0 18px 5px rgba(150, 120, 255, .7);
+  animation: portal-spin 1s linear infinite; }
+.power .portal::after { content: ""; position: absolute; inset: 16%; border-radius: 50%;
+  background: radial-gradient(circle, #000 0 45%, #14102e 70%, #2a1f66 100%);
+  box-shadow: inset 0 0 14px 4px #000, 0 0 0 3px rgba(255, 255, 255, .35); }
+.power.portal-open img { opacity: 0; transform: scale(.2) rotate(-120deg); }
+.power.portal-open .portal { opacity: 1; transform: scale(1); }
+@keyframes portal-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .power .portal i { animation: none; } }
 .power:hover { transform: translateY(-1px); }
 .power.on { background: linear-gradient(#285ac8, #122e82); border-color: var(--good); }
 .power.busy { opacity: .6; }

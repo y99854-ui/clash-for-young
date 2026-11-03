@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<!-- 彩蛋的全屏透明窗口：小猫从主窗口的传送门喷出来，在屏幕四边反弹。鼠标点击会穿过这个窗口。 -->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="cats.js"></script>
+<script>
+(() => {
+  const T = window.__TAURI__;
+  const cv = document.getElementById("c");
+  const ctx = cv.getContext("2d");
+  let W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // 小猫图片：先用灰猫，彩色的做好后替换
+  const gray = new Image(); gray.src = "assets/cat-awake.png";
+  let imgs = [{ img: gray, hue: null }];
+  makeCatColors().then((list) => {
+    imgs = list.map((src, i) => { const im = new Image(); im.src = src; return { img: im, hue: CAT_HUES[i] }; });
+  }).catch(() => {});
+
+  const G = 1700;          // 重力，像素/秒²
+  const MAX_CATS = 180;    // 同时最多多少只，太多就让最早的先消失
+  let cats = [], sparks = [], rings = [];
+  let lastSpawn = 0, frame = 0, last = 0, active = false;
+
+  function spawn(p) {
+    lastSpawn = performance.now();
+    active = true;
+    for (let k = 0; k < (p.n || 3); k++) {
+      const pick = imgs[Math.floor(Math.random() * imgs.length)];
+      const size = 26 + Math.random() * 34;
+      const angle = (-90 + (Math.random() - 0.5) * 110) * Math.PI / 180;
+      const speed = 700 + Math.random() * 650;
+      cats.push({
+        img: pick.img, hue: pick.hue, size,
+        x: p.x - size / 2, y: p.y - size / 2,
+        vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+        rot: 0, vr: (Math.random() - 0.5) * 900,
+        born: lastSpawn, restAt: 0, fadeAt: 0, alpha: 1,
+        squashAt: 0, squashAxis: "y",
+      });
+    }
+    if (cats.length > MAX_CATS) {
+      for (const c of cats.slice(0, cats.length - MAX_CATS)) if (!c.fadeAt) c.fadeAt = lastSpawn;
+    }
+    if (!frame) { last = 0; frame = requestAnimationFrame(step); }
+  }
+
+  const colorOf = (hue, l = 65) => hue === null ? `hsl(230, 12%, ${l}%)` : `hsl(${hue}, 85%, ${l}%)`;
+
+  // 撞到屏幕边：小猫压扁一下，迸出火花，边上亮起一圈光
+  function hit(c, side, speed, now) {
+    if (speed < 160) return;
+    c.squashAt = now;
+    c.squashAxis = side === "bottom" || side === "top" ? "y" : "x";
+    const s = c.size;
+    const px = side === "left" ? 0 : side === "right" ? W : c.x + s / 2;
+    const py = side === "top" ? 0 : side === "bottom" ? H : c.y + s / 2;
+    // 火花往远离墙的方向飞
+    const nx = side === "left" ? 1 : side === "right" ? -1 : 0;
+    const ny = side === "top" ? 1 : side === "bottom" ? -1 : 0;
+    const count = Math.min(12, 3 + Math.floor(speed / 120));
+    for (let i = 0; i < count; i++) {
+      const a = Math.atan2(ny, nx) + (Math.random() - 0.5) * 2.2;
+      const v = speed * (0.25 + Math.random() * 0.35);
+      sparks.push({ x: px, y: py, vx: Math.cos(a) * v, vy: Math.sin(a) * v, born: now, life: 380 + Math.random() * 260, r: 1.5 + Math.random() * 2.5, color: colorOf(c.hue, 60 + Math.random() * 20) });
+    }
+    rings.push({ x: px, y: py, side, born: now, max: 18 + Math.min(70, speed / 18), color: colorOf(c.hue, 70) });
+  }
+
+  function step(now) {
+    const dt = Math.min(0.033, last ? (now - last) / 1000 : 0.016);
+    last = now;
+
+    for (const c of cats) {
+      const s = c.size;
+      if (!c.restAt) {
+        c.vy += G * dt;
+        c.x += c.vx * dt; c.y += c.vy * dt;
+        c.rot += c.vr * dt;
+        if (c.x < 0) { hit(c, "left", Math.abs(c.vx), now); c.x = 0; c.vx = Math.abs(c.vx) * 0.7; c.vr *= -0.6; }
+        if (c.x > W - s) { hit(c, "right", Math.abs(c.vx), now); c.x = W - s; c.vx = -Math.abs(c.vx) * 0.7; c.vr *= -0.6; }
+        if (c.y < 0) { hit(c, "top", Math.abs(c.vy), now); c.y = 0; c.vy = Math.abs(c.vy) * 0.6; }
+        if (c.y > H - s) {
+          hit(c, "bottom", Math.abs(c.vy), now);
+          c.y = H - s;
+          c.vy = -Math.abs(c.vy) * 0.45;
+          c.vx *= 0.8; c.vr *= 0.65;
+          if (Math.abs(c.vy) < 90) { c.vy = 0; c.restAt = now; }
+        }
+      } else {
+        // 落地后在地上滑一小段、慢慢摆正
+        c.x += c.vx * dt;
+        c.vx *= Math.pow(0.03, dt);
+        if (c.x < 0) { c.x = 0; c.vx = -c.vx * 0.5; }
+        if (c.x > W - s) { c.x = W - s; c.vx = -c.vx * 0.5; }
+        const target = Math.round(c.rot / 90) * 90;
+        c.rot += (target - c.rot) * Math.min(1, dt * 6);
+      }
+      // 落地 4 秒后，或者出来 12 秒后，淡出
+      if (!c.fadeAt && ((c.restAt && now - c.restAt > 4000) || now - c.born > 12000)) c.fadeAt = now;
+      if (c.fadeAt) c.alpha = Math.max(0, 1 - (now - c.fadeAt) / 700);
+    }
+    cats = cats.filter((c) => c.alpha > 0);
+
+    for (const p of sparks) { p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
+    sparks = sparks.filter((p) => now - p.born < p.life);
+    rings = rings.filter((r) => now - r.born < 420);
+
+    draw(now);
+
+    if (!cats.length && !sparks.length && !rings.length && now - lastSpawn > 1200) {
+      frame = 0;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (active) { active = false; T.core.invoke("cat_overlay_done").catch(() => {}); }
+      return;
+    }
+    frame = requestAnimationFrame(step);
+  }
+
+  function draw(now) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    // 边缘光圈：贴着屏幕边的半个椭圆，向外扩散后消失
+    for (const r of rings) {
+      const t = (now - r.born) / 420;
+      const rad = r.max * (0.3 + 0.7 * t);
+      ctx.save();
+      ctx.globalAlpha = (1 - t) * 0.9;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 3 * (1 - t) + 1;
+      ctx.shadowColor = r.color; ctx.shadowBlur = 12;
+      ctx.beginPath();
+      if (r.side === "bottom") ctx.ellipse(r.x, r.y, rad * 1.6, rad * 0.7, 0, Math.PI, 2 * Math.PI);
+      else if (r.side === "top") ctx.ellipse(r.x, r.y, rad * 1.6, rad * 0.7, 0, 0, Math.PI);
+      else if (r.side === "left") ctx.ellipse(r.x, r.y, rad * 0.7, rad * 1.6, 0, -Math.PI / 2, Math.PI / 2);
+      else ctx.ellipse(r.x, r.y, rad * 0.7, rad * 1.6, 0, Math.PI / 2, Math.PI * 1.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    for (const p of sparks) {
+      const t = (now - p.born) / p.life;
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 - t * 0.5), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.imageSmoothingEnabled = false;
+    for (const c of cats) {
+      const s = c.size;
+      const im = c.img;
+      const h = im.naturalWidth ? s * im.naturalHeight / im.naturalWidth : s;
+      // 刚喷出来时从小变大，像从传送门里钻出来
+      const grow = Math.min(1, 0.3 + (now - c.born) / 180);
+      // 撞墙压扁：沿撞击方向扁、另一个方向鼓
+      const k = c.squashAt ? Math.max(0, 1 - (now - c.squashAt) / 170) : 0;
+      let sx = 1, sy = 1;
+      if (k) { if (c.squashAxis === "y") { sx = 1 + 0.4 * k; sy = 1 - 0.35 * k; } else { sx = 1 - 0.35 * k; sy = 1 + 0.4 * k; } }
+      ctx.save();
+      ctx.globalAlpha = c.alpha;
+      ctx.translate(c.x + s / 2, c.y + s / 2);
+      ctx.scale(sx * grow, sy * grow);
+      ctx.rotate(c.rot * Math.PI / 180);
+      if (im.complete && im.naturalWidth) ctx.drawImage(im, -s / 2, -h / 2, s, h);
+      ctx.restore();
+    }
+  }
+
+  // 先开始监听，再告诉主程序准备好了，领走准备期间攒下的小猫
+  T.event.listen("cat-spawn", (e) => spawn(e.payload)).then(() =>
+    T.core.invoke("cat_overlay_ready").then((list) => (list || []).forEach(spawn))
+  );
+})();
+</script>
+</body>
+</html>
