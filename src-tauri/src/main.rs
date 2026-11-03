@@ -5,6 +5,7 @@
 mod i18n;
 mod edition;
 mod app;
+mod catrain;
 mod check;
 mod configgen;
 mod core;
@@ -65,6 +66,10 @@ fn main() {
             if cfg!(target_os = "linux") {
                 return;
             }
+            // 只管主窗口；彩蛋的小猫窗口不走这里
+            if window.label() != "main" {
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 tray::hide_to_tray(window.app_handle());
@@ -105,6 +110,9 @@ fn main() {
             app::set_campus_mode,
             app::set_terminal_proxy,
             app::set_sub_update_hours,
+            catrain::cat_spawn,
+            catrain::cat_overlay_ready,
+            catrain::cat_overlay_done,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")
