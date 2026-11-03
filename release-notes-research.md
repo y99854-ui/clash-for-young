@@ -1,9 +1,9 @@
-## 彩蛋升级 · Easter egg upgrade
+## 修复 Windows 上的彩蛋 · Easter egg fix for Windows
 
 **中文**
-- 上一版藏的小彩蛋升级了：这次的小猫会冲出软件窗口，在整个屏幕上撒欢 🐱 还没找到的话，试试多点几下软件里的某个地方。
-- 小猫只是在屏幕上画出来的，鼠标点击会直接穿过去，不影响你用电脑。
+- 修复：在 Windows 上触发彩蛋后，开关会一直停在传送门的样子，小猫也喷不出来。
+- 以后如果某台电脑不支持小猫飞出窗口，会自动改为在软件窗口里喷小猫。
 
 **English**
-- The little easter egg from last time got an upgrade: the cats now burst out of the app window and bounce around your whole screen 🐱 Haven't found it yet? Try tapping a certain spot in the app a few times.
-- The cats are only drawn on top of the screen. Clicks pass straight through, so they won't get in the way.
+- Fixed: on Windows, triggering the easter egg left the switch stuck as a portal and no cats came out.
+- If a computer can't show cats outside the app window, they now appear inside the window instead.
