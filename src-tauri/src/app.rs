@@ -436,6 +436,8 @@ pub struct StateView {
     pub campus_mode: bool,
     /// 科研版：终端代理
     pub terminal_proxy: bool,
+    /// 订阅自动更新间隔（小时），0 = 只手动更新
+    pub sub_update_hours: u32,
 }
 
 /// 本地开发时的版本号（界面显示为“开发版”）
@@ -496,6 +498,7 @@ fn state_view(app: &AppState) -> StateView {
         app_name: crate::edition::name().to_string(),
         download_url: crate::edition::download_url().to_string(),
         campus_mode: st.campus_mode,
+        sub_update_hours: st.sub_update_hours,
         terminal_proxy: st.terminal_proxy,
     }
 }
@@ -636,6 +639,17 @@ pub fn set_language(app: S, handle: tauri::AppHandle, language: String) -> Resul
     app.settings.lock().unwrap().language = language;
     app.save_settings()?;
     crate::tray::relabel(&handle);
+    Ok(state_view(&app))
+}
+
+/// 订阅自动更新间隔（小时），0 = 只手动更新
+#[tauri::command]
+pub fn set_sub_update_hours(app: S, hours: u32) -> Result<StateView, String> {
+    if !crate::settings::SUB_UPDATE_CHOICES.contains(&hours) {
+        return Err(crate::tr!("不支持的更新间隔", "Unsupported update interval"));
+    }
+    app.settings.lock().unwrap().sub_update_hours = hours;
+    app.save_settings()?;
     Ok(state_view(&app))
 }
 

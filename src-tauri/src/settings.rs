@@ -101,7 +101,13 @@ pub struct Settings {
     pub campus_mode: bool,
     /// 科研版：连接时让新打开的终端走代理（git、pip、conda 等）
     pub terminal_proxy: bool,
+    /// 链接订阅多久自动更新一次（小时），0 = 只手动更新
+    pub sub_update_hours: u32,
 }
+
+/// 订阅自动更新间隔可选的值（小时），0 = 只手动更新
+pub const SUB_UPDATE_CHOICES: [u32; 6] = [0, 6, 12, 24, 48, 168];
+pub const DEFAULT_SUB_UPDATE_HOURS: u32 = 24;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -123,6 +129,7 @@ impl Default for Settings {
             language: String::new(),
             campus_mode: false,
             terminal_proxy: false,
+            sub_update_hours: DEFAULT_SUB_UPDATE_HOURS,
         }
     }
 }
@@ -147,6 +154,9 @@ pub fn load(dir: &Path) -> Settings {
     }
     if s.default_target.is_empty() {
         s.default_target = "fastest".into();
+    }
+    if !SUB_UPDATE_CHOICES.contains(&s.sub_update_hours) {
+        s.sub_update_hours = DEFAULT_SUB_UPDATE_HOURS;
     }
     s
 }

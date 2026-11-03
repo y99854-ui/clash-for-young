@@ -22,9 +22,6 @@ use app::AppState;
 use std::time::Duration;
 use tauri::{Manager, RunEvent, WindowEvent};
 
-/// 订阅多久自动更新一次
-const AUTO_UPDATE: Duration = Duration::from_secs(6 * 3600);
-
 fn main() {
     tauri::Builder::default()
         // 只允许运行一个：再次打开时把已有的窗口叫出来。
@@ -44,13 +41,14 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 let st = handle.state::<AppState>();
                 app::on_startup(&st).await;
-                // 定时更新订阅
+                // 定时更新订阅：间隔在设置里调（默认 24 小时，0 = 只手动更新）。
+                // 按“上次更新时间”判断而不是固定计时，电脑睡眠醒来后也能及时补上。
                 loop {
                     let due = {
                         let s = st.settings.lock().unwrap();
-                        s.subscriptions.iter().any(|x| {
-                            !x.url.is_empty() && settings::now_ms() - x.updated_at > AUTO_UPDATE.as_millis() as i64
-                        })
+                        let interval_ms = s.sub_update_hours as i64 * 3600 * 1000;
+                        s.sub_update_hours > 0
+                            && s.subscriptions.iter().any(|x| !x.url.is_empty() && settings::now_ms() - x.updated_at > interval_ms)
                     };
                     if due {
                         app::auto_refresh(&st).await;
@@ -106,6 +104,7 @@ fn main() {
             app::set_language,
             app::set_campus_mode,
             app::set_terminal_proxy,
+            app::set_sub_update_hours,
         ])
         .build(tauri::generate_context!())
         .expect("启动失败")

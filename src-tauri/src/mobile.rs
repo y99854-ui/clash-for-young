@@ -78,7 +78,7 @@ pub fn generate(input: &MobileInput) -> Result<String, String> {
             map(vec![
                 ("type", s("http")),
                 ("url", s(sub.url.trim())),
-                ("interval", Value::from(21600)),
+                ("interval", Value::from(st.sub_update_hours as u64 * 3600)), // 和电脑上的设置一致；0 = 不自动更新
                 ("path", Value::from(format!("./providers/cfy-{}.yaml", sub.id))),
                 ("override", map(vec![("udp", Value::from(true))])),
             ]),
