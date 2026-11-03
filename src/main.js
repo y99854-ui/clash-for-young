@@ -934,6 +934,7 @@ let catColors = null; // makeCatColors 在 cats.js 里
 let catRainUntil = 0;
 // 小猫优先交给全屏的小猫窗口画，能飞出软件窗口；那个窗口开不起来时退回在本窗口里喷
 let catOverlayOk = true;
+let catOverlaySeen = false; // 小猫窗口至少成功加载过一次
 async function catRain() {
   if (!catColors) {
     try { catColors = await makeCatColors(); } catch (_) { catColors = ["assets/cat-awake.png"]; }
@@ -941,39 +942,48 @@ async function catRain() {
   const running = Date.now() < catRainUntil;
   catRainUntil = Date.now() + 8000; // 再连点 4 次会延长
   if (running) return;
+  const startedAt = Date.now();
   document.querySelectorAll(".power").forEach((b) => b.classList.add("portal-open"));
   const tick = async () => {
     if (Date.now() > catRainUntil) {
       document.querySelectorAll(".power").forEach((b) => b.classList.remove("portal-open"));
       return;
     }
+    setTimeout(tick, 150); // 先排好下一次，小猫窗口卡住也不影响传送门按时关上
     const src = catSource();
-    if (src) {
-      const r = src.r;
-      src.pulse.animate(
-        [{ transform: "scale(1)" }, { transform: "scale(1.14, 0.88)" }, { transform: "scale(1)" }],
-        { duration: 150, easing: "ease-out" },
-      );
-      if (catOverlayOk) {
-        try {
-          await window.__TAURI__.core.invoke("cat_spawn", { x: r.left + r.width / 2, y: r.top + r.height / 2, n: 3 });
-        } catch (e) {
+    if (!src) return;
+    const r = src.r;
+    src.pulse.animate(
+      [{ transform: "scale(1)" }, { transform: "scale(1.14, 0.88)" }, { transform: "scale(1)" }],
+      { duration: 150, easing: "ease-out" },
+    );
+    if (catOverlayOk) {
+      try {
+        // 1.5 秒没回应、或 2 秒还没加载好，就认为小猫窗口在这台电脑上用不了
+        const ready = await Promise.race([
+          window.__TAURI__.core.invoke("cat_spawn", { x: r.left + r.width / 2, y: r.top + r.height / 2, n: 3 }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("小猫窗口没有回应")), 1500)),
+        ]);
+        if (ready) catOverlaySeen = true;
+        else if (!catOverlaySeen && Date.now() - startedAt > 2000) throw new Error("小猫窗口没有加载出来");
+      } catch (e) {
+        if (catOverlayOk) {
           catOverlayOk = false;
           console.warn("小猫窗口不可用，改在本窗口里喷", e);
+          window.__TAURI__.core.invoke("cat_overlay_done").catch(() => {});
         }
-      }
-      if (!catOverlayOk) {
-        let layer = $("catRain");
-        if (!layer) {
-          layer = document.createElement("div");
-          layer.id = "catRain";
-          document.body.appendChild(layer);
-        }
-        for (let k = 0; k < 3; k++) sprayCat(layer, r);
-        if (!catFrame) catFrame = requestAnimationFrame(stepCats);
       }
     }
-    setTimeout(tick, 150);
+    if (!catOverlayOk) {
+      let layer = $("catRain");
+      if (!layer) {
+        layer = document.createElement("div");
+        layer.id = "catRain";
+        document.body.appendChild(layer);
+      }
+      for (let k = 0; k < 3; k++) sprayCat(layer, r);
+      if (!catFrame) catFrame = requestAnimationFrame(stepCats);
+    }
   };
   tick();
 }
