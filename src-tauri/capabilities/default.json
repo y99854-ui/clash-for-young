@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口的默认权限",
-  "windows": ["main"],
+  "description": "主窗口和彩蛋小猫窗口的默认权限",
+  "windows": ["main", "catrain"],
   "permissions": ["core:default"]
 }
